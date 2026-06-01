@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>LG Signage Universal Rust Adapter</title>
+
+    <script src="./pkg/rust_lg_adapter.js"></script>
+
+    <script>
+      // FIX: Manually bind the locally scoped let variable to the global window object
+      if (typeof wasm_bindgen !== "undefined") {
+        window.wasm_bindgen = wasm_bindgen;
+      }
+    </script>
+
+    <script src="./adapter.js"></script>
+
+    <script>
+      window.onload = function () {
+        console.log("Initializing WebOS Application...");
+
+        // Ensure the script wrapper has successfully mounted the global function
+        if (!window.wasm_bindgen) {
+          console.error(
+            "Critical: 'wasm_bindgen' variable could not be bridged to window.",
+          );
+          return;
+        }
+
+        // In '--target no-modules', the global itself IS the initialization function.
+        window
+          .wasm_bindgen("./pkg/rust_lg_adapter_bg.wasm")
+          .then(function () {
+            console.log("Rust Core successfully loaded into Frontend!");
+
+            // Boot up your application entry point defined in adapter.js
+            if (typeof window.onAppStart === "function") {
+              window.onAppStart();
+            }
+          })
+          .catch(function (error) {
+            console.error("Failed to initialize Rust Core:", error);
+          });
+      };
+    </script>
+  </head>
+  <body>
+    <h1>LG webOS Signage Status: Active</h1>
+    <div id="display-log">
+      Check the Web Inspector Console to see the Rust &lt;-&gt; JS logs.
+    </div>
+  </body>
+</html>

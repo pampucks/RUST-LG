@@ -1,0 +1,14 @@
+/home/pampam/Work/webos-signage/RUST-LG/target/wasm32-unknown-unknown/release/deps/serde-a5eff9c5f1894a98.d: /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/pampam/Work/webos-signage/RUST-LG/target/wasm32-unknown-unknown/release/build/serde-7d7a11c85ff269e2/out/private.rs
+
+/home/pampam/Work/webos-signage/RUST-LG/target/wasm32-unknown-unknown/release/deps/libserde-a5eff9c5f1894a98.rlib: /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/pampam/Work/webos-signage/RUST-LG/target/wasm32-unknown-unknown/release/build/serde-7d7a11c85ff269e2/out/private.rs
+
+/home/pampam/Work/webos-signage/RUST-LG/target/wasm32-unknown-unknown/release/deps/libserde-a5eff9c5f1894a98.rmeta: /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/pampam/Work/webos-signage/RUST-LG/target/wasm32-unknown-unknown/release/build/serde-7d7a11c85ff269e2/out/private.rs
+
+/home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/home/pampam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/home/pampam/Work/webos-signage/RUST-LG/target/wasm32-unknown-unknown/release/build/serde-7d7a11c85ff269e2/out/private.rs:
+
+# env-dep:OUT_DIR=/home/pampam/Work/webos-signage/RUST-LG/target/wasm32-unknown-unknown/release/build/serde-7d7a11c85ff269e2/out
