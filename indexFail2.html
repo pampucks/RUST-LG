@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Rust LG SCAP Sandbox</title>
+    <style>
+      body {
+        background-color: #121214;
+        color: #e1e1e6;
+        font-family: sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+      }
+      .console-box {
+        background-color: #1d1d22;
+        border: 2px solid #ff4136;
+        border-radius: 8px;
+        padding: 30px;
+        width: 70%;
+        text-align: center;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+      }
+      h1 {
+        color: #ff4136;
+        margin-top: 0;
+        font-size: 24pt;
+      }
+      #sandboxStatus {
+        font-size: 18pt;
+        margin: 20px 0;
+        color: #ffdf00;
+      }
+      #logTerminal {
+        text-align: left;
+        background: #000;
+        padding: 15px;
+        font-family: monospace;
+        border-radius: 4px;
+        font-size: 11pt;
+        color: #00ff00;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+    </style>
+
+    <script src="SCAP_Library-official-1.8.2-20260127/js/webOS.js"></script>
+
+    <script src="SCAP_Library-official-1.8.2-20260127/js/cordova/2.7.0/cordova.webos.js"></script>
+
+    <script src="SCAP_Library-official-1.8.2-20260127/js/custom.js"></script>
+
+    <script src="SCAP_Library-official-1.8.2-20260127/js/cordova-cd/configuration.js"></script>
+
+    <script src="adapter.js"></script>
+  </head>
+  <body>
+    <div class="console-box">
+      <h1>RUST ⇄ LG HARDWARE ISOLATION SANDBOX</h1>
+      <div id="sandboxStatus">Initializing WebAssembly Module Engine...</div>
+      <div id="logTerminal">
+        > Ready to interface with SM5J Microcontroller...
+      </div>
+    </div>
+
+    <script type="module">
+      import init, {
+        process_signage_command,
+        process_hardware_event,
+      } from "./pkg/rust_lg_adapter.js";
+
+      window.onload = function () {
+        var term = document.getElementById("logTerminal");
+
+        init()
+          .then(function () {
+            document.getElementById("sandboxStatus").innerText =
+              "Rust Engine Online.";
+            term.innerHTML +=
+              "<br>> [WASM] Core binary memory map bound successfully via ES Modules.";
+
+            // Map the compiled Rust entry functions explicitly to the window space for adapter.js
+            window.rust_process_signage_command = process_signage_command;
+            window.rust_process_hardware_event = process_hardware_event;
+
+            // Fire up our system bridge command pipeline
+            onAppStart();
+          })
+          .catch(function (err) {
+            document.getElementById("sandboxStatus").innerText =
+              "Initialization Failure.";
+            term.innerHTML +=
+              "<br><span style='color:red;'>[WASM Error] " + err + "</span>";
+          });
+      };
+    </script>
+  </body>
+</html>

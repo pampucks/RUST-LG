@@ -1,1 +1,1 @@
-/home/pampam/Work/webos-signage/RUST-LG/target/wasm32-unknown-unknown/release/rust_lg_adapter.wasm: /home/pampam/Work/webos-signage/RUST-LG/src/lib.rs
+C:\Users\DMM\ User\Documents\GitHub\RUST-LG\target\wasm32-unknown-unknown\release\rust_lg_adapter.wasm: C:\Users\DMM\ User\Documents\GitHub\RUST-LG\src\lib.rs

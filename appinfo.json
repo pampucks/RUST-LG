@@ -1,0 +1,11 @@
+{
+  "id": "com.lg.app.signage.dev",
+  "version": "1.0.0",
+  "vendor": "DMM-Sandbox",
+  "type": "web",
+  "main": "index.html",
+  "title": "Rust Pure SCAP Sandbox",
+  "icon": "icon.png",
+  "disableBackHistoryAPI": true,
+  "requiredPermissions": ["signage"]
+}

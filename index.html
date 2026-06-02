@@ -1,53 +1,169 @@
 <!doctype html>
 <html>
   <head>
-    <meta charset="utf-8" />
-    <title>LG Signage Universal Rust Adapter</title>
-
-    <script src="./pkg/rust_lg_adapter.js"></script>
-
-    <script>
-      // FIX: Manually bind the locally scoped let variable to the global window object
-      if (typeof wasm_bindgen !== "undefined") {
-        window.wasm_bindgen = wasm_bindgen;
+    <title>Rust LG SCAP Sandbox</title>
+    <style>
+      body {
+        background-color: #121214;
+        color: #e1e1e6;
+        font-family: sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
       }
-    </script>
+      .console-box {
+        background-color: #1d1d22;
+        border: 2px solid #ff4136;
+        border-radius: 8px;
+        padding: 30px;
+        width: 70%;
+        text-align: center;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+      }
+      h1 {
+        color: #ff4136;
+        margin-top: 0;
+        font-size: 24pt;
+      }
+      #sandboxStatus {
+        font-size: 18pt;
+        margin: 20px 0;
+        color: #ffdf00;
+      }
+      #logTerminal {
+        text-align: left;
+        background: #000;
+        padding: 15px;
+        font-family: monospace;
+        border-radius: 4px;
+        font-size: 11pt;
+        color: #00ff00;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+    </style>
 
-    <script src="./adapter.js"></script>
+    <script src="SCAP_Library-official-1.8.2-20260127/js/webOS.js"></script>
 
-    <script>
-      window.onload = function () {
-        console.log("Initializing WebOS Application...");
+    <script src="SCAP_Library-official-1.8.2-20260127/js/cordova/2.7.0/cordova.webos.js"></script>
 
-        // Ensure the script wrapper has successfully mounted the global function
-        if (!window.wasm_bindgen) {
-          console.error(
-            "Critical: 'wasm_bindgen' variable could not be bridged to window.",
-          );
-          return;
-        }
+    <script src="SCAP_Library-official-1.8.2-20260127/js/custom.js"></script>
 
-        // In '--target no-modules', the global itself IS the initialization function.
-        window
-          .wasm_bindgen("./pkg/rust_lg_adapter_bg.wasm")
-          .then(function () {
-            console.log("Rust Core successfully loaded into Frontend!");
+    <script src="SCAP_Library-official-1.8.2-20260127/js/cordova-cd/configuration.js"></script>
 
-            // Boot up your application entry point defined in adapter.js
-            if (typeof window.onAppStart === "function") {
-              window.onAppStart();
-            }
-          })
-          .catch(function (error) {
-            console.error("Failed to initialize Rust Core:", error);
-          });
-      };
-    </script>
+    <script src="adapter.js"></script>
   </head>
   <body>
-    <h1>LG webOS Signage Status: Active</h1>
-    <div id="display-log">
-      Check the Web Inspector Console to see the Rust &lt;-&gt; JS logs.
+    <div class="console-box">
+      <h1>RUST ⇄ LG HARDWARE ISOLATION SANDBOX</h1>
+      <div id="sandboxStatus">Initializing WebAssembly Module Engine...</div>
+      <div id="logTerminal">
+        > Ready to interface with SM5J Microcontroller...
+      </div>
     </div>
+
+    <script type="module">
+      import init, {
+        process_signage_command,
+        process_hardware_event,
+      } from "./pkg/rust_lg_adapter.js";
+
+      window.onload = function () {
+        var term = document.getElementById("logTerminal");
+
+        // Helper function to bypass the fetch() file:// restriction using XHR
+        function loadWasmBinaryViaXHR(url) {
+          return new Promise(function (resolve, reject) {
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET", url, true);
+            xhr.responseType = "arraybuffer";
+
+            xhr.onload = function () {
+              if (
+                xhr.status === 200 ||
+                (xhr.status === 0 &&
+                  xhr.response &&
+                  xhr.response.byteLength > 0)
+              ) {
+                resolve(xhr.response);
+              } else {
+                reject(
+                  new Error(
+                    "XHR failed to read local WASM file. Status: " + xhr.status
+                  )
+                );
+              }
+            };
+
+            xhr.onerror = function () {
+              reject(
+                new Error(
+                  "XHR network error occurred while reading local disk memory."
+                )
+              );
+            };
+
+            xhr.send();
+          });
+        }
+
+        // 1. Read raw binary bytecode from webOS disk storage
+        loadWasmBinaryViaXHR("pkg/rust_lg_adapter_bg.wasm")
+          .then(function (wasmArrayBuffer) {
+            term.innerHTML +=
+              "<br>> [Disk I/O] Successfully read WASM bytes via local XHR channel.";
+
+            // 2. Explicitly compile the raw bytes into a WebAssembly Module object in memory
+            return WebAssembly.compile(wasmArrayBuffer);
+          })
+          .then(function (compiledWasmModule) {
+            term.innerHTML +=
+              "<br>> [Compiler] WebAssembly binary compiled into memory module target.";
+
+            // 3. Initialize the engine using the pre-compiled module
+            return init({ module_or_path: compiledWasmModule });
+          })
+          .then(function () {
+            document.getElementById("sandboxStatus").innerText =
+              "Rust Engine Online.";
+            term.innerHTML +=
+              "<br>> [WASM] Core binary memory map bound successfully via ArrayBuffer payload.";
+
+            // Map the compiled Rust entry functions explicitly to the window space
+            window.rust_process_signage_command = process_signage_command;
+            window.rust_process_hardware_event = process_hardware_event;
+
+            // Fire up our system bridge command pipeline
+            onAppStart();
+          })
+          .catch(function (err) {
+            document.getElementById("sandboxStatus").innerText =
+              "Initialization Failure.";
+            term.innerHTML +=
+              "<br><span style='color:red;'>[WASM Error] " + err + "</span>";
+          });
+
+        // Listen for the app coming back from the background
+        document.addEventListener("visibilitychange", function () {
+          if (document.visibilityState === "visible") {
+            // FIX: Add safety guard check so it doesn't interrupt initial boot
+            if (typeof window.rust_process_signage_command === "function") {
+              console.log(
+                "[JS Sandbox] App resumed from background. Forcing hardware sync..."
+              );
+              if (typeof onAppStart === "function") {
+                onAppStart();
+              }
+            } else {
+              console.log(
+                "[JS Sandbox] App visibility triggered during initial boot. Deferring to WASM lifecycle."
+              );
+            }
+          }
+        });
+      };
+    </script>
   </body>
 </html>

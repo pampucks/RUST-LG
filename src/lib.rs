@@ -1,13 +1,7 @@
-// Cargo.toml setup:
-// [dependencies]
-// wasm-bindgen = "0.2"
-// serde = { version = "1.0", features = ["derive"] }
-// serde_json = "1.0"
-
-use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
 
-// Define the incoming message format from JavaScript
+// 1. Data coming from JavaScript app layer into Rust
 #[derive(Deserialize)]
 struct IncomingCommand {
     req_id: u32,
@@ -15,71 +9,58 @@ struct IncomingCommand {
     payload: Option<serde_json::Value>,
 }
 
-// Define the outgoing response format back to JavaScript
+// 2. Data going from Rust out to the LG SCAP hardware bridge
 #[derive(Serialize)]
-struct OutgoingResponse {
+struct OutgoingHardwareRequest {
     req_id: u32,
-    status: String,
-    message: String,
+    action: String,
+    value: u8,
 }
-
-// Import the Javascript callback function signature
-#[wasm_bindgen]
-extern "C" {
-    // This allows Rust to call a JS function named 'scapCallbackBridge'
-    fn scapCallbackBridge(response_json: &str);
-}
-
-#[wasm_bindgen]
-pub fn process_signage_command(json_str: &str) {
-    // 1. Parse the incoming JSON from the JS Adapter
-    let command: IncomingCommand = match serde_json::from_str(json_str) {
-        Ok(cmd) => cmd,
-        Err(_) => {
-            // Handle parsing error natively
-            return; 
-        }
-    };
-
-    // 2. Process the Core Logic (e.g., sync timings, state changes)
-    let mut response = OutgoingResponse {
-        req_id: command.req_id,
-        status: String::from("ERROR"),
-        message: String::from("Unknown Action"),
-    };
-
-    match command.action.as_str() {
-        "SET_BRIGHTNESS" => {
-            // Your core logic for adjusting display parameters
-            response.status = String::from("SUCCESS");
-            response.message = String::from("Brightness calculated and staged");
-        },
-        "SYNC_VIDEO" => {
-            // Core logic for Android/LG/Samsung sync timings
-            response.status = String::from("SUCCESS");
-            response.message = String::from("Timing data calculated");
-        },
-        _ => {}
-    }
-
-    // 3. Serialize the response and send it back to the JS Adapter
-    if let Ok(response_json) = serde_json::to_string(&response) {
-        // Send the JSON string back across the boundary to JS
-        scapCallbackBridge(&response_json);
-    }
-}
-
-// Append this to the bottom of src/lib.rs instead to avoid editing Cargo.toml
 
 #[wasm_bindgen]
 extern "C" {
+    // Connect to our JS bridge function
+    fn scapCallbackBridge(json_str: &str);
+
     // Bind directly to the browser's console.log
     #[wasm_bindgen(js_namespace = console)]
     fn log(s: &str);
 }
 
 #[wasm_bindgen]
+pub fn process_signage_command(json_str: &str) {
+    log("[Rust Core] Incoming command string received.");
+
+    // Translate JSON string to Rust structures (Command Parsing)
+    if let Ok(cmd) = serde_json::from_str::<IncomingCommand>(json_str) {
+        if cmd.action == "SET_BRIGHTNESS" {
+            
+            // Extract the target number value safely, defaulting to 50 if missing
+            let target_brightness = cmd.payload
+                .and_then(|p| p.get("target").and_then(|t| t.as_u64()))
+                .unwrap_or(50) as u8;
+
+            log(&format!("[Rust Core] Validated safety metrics. Processing brightness parameter: {}%", target_brightness));
+
+            // Structure the downstream hardware command match for JavaScript
+            let hardware_req = OutgoingHardwareRequest {
+                req_id: cmd.req_id,
+                action: String::from("SET_PICTURE_PROPERTY"),
+                value: target_brightness,
+            };
+
+            // Stringify back into a JSON structure and pass across the bridge to JS
+            if let Ok(out_str) = serde_json::to_string(&hardware_req) {
+                scapCallbackBridge(&out_str);
+            }
+        }
+    } else {
+        log("[Rust Core] Error: Could not parse incoming application payload.");
+    }
+}
+
+#[wasm_bindgen]
 pub fn process_hardware_event(json_str: &str) {
-    // Rust receives the confirmation from the JS SCAP API
-    log(&format!("[Rust Core] Successfully confirmed hardware action: {}", json_str));
+    // Rust receives the absolute confirmation directly from the physical SCAP callbacks
+    log(&format!("[Rust Core] Hardware Confirmation Received: {}", json_str));
 }
