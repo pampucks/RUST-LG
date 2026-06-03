@@ -1,0 +1,462 @@
+* {
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+/* Layout */
+body {
+  width: 100%;
+  height: 100%;
+}
+#tabBar {
+  display: none;
+  position: absolute;
+  top: 65px;
+  left: 0;
+  z-index: 8;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding-left: 25px;
+  padding-right: 25px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  text-align: left;
+  color: #000;
+  font-size: 14pt;
+  width: 50%;
+  height: fit-content;
+}
+.tabClass {
+  display: inline-block;
+  /* position: absolute;
+    top: 50%;
+    bottom: -50%; */
+  /* z-index: 8; */
+  background-color: rgba(255, 255, 255, 0.7);
+  padding-left: 10px;
+  padding-right: 10px;
+  padding-top: 15px;
+  padding-bottom: 20px;
+  text-align: center;
+  color: #000;
+  font-size: 14pt;
+  width: 120px;
+  height: 10px;
+  border-radius: 8px;
+}
+.active {
+  background-color: rgba(255, 255, 255, 1);
+}
+.inactive {
+  background-color: rgba(255, 255, 255, 0.4);
+}
+#idStatus {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9;
+  background-color: #ffff00;
+  padding: 15px;
+  padding-left: 25px;
+  padding-right: 25px;
+  text-align: left;
+  color: #000000;
+  font-size: 22pt;
+  width: 50%;
+  height: 3%;
+}
+#currentStatus {
+  display: block;
+  position: absolute;
+  top: 128px;
+  left: 0;
+  z-index: 8;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding-left: 25px;
+  padding-right: 25px;
+  padding-bottom: 25px;
+  padding-top: 15px;
+  text-align: left;
+  color: #ffffff;
+  font-size: 14pt;
+  width: 50%;
+  height: 73%;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+#syncStatus {
+  display: none;
+  position: absolute;
+  top: 128px;
+  left: 0;
+  z-index: 7;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding-left: 25px;
+  padding-right: 25px;
+  padding-bottom: 25px;
+  padding-top: 15px;
+  text-align: left;
+  color: #ffffff;
+  font-size: 14pt;
+  width: 50%;
+  height: 73%;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+#campaignLog {
+  display: none;
+  position: absolute;
+  top: 128px;
+  left: 0;
+  z-index: 6;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding-left: 25px;
+  padding-right: 25px;
+  padding-bottom: 25px;
+  padding-top: 15px;
+  text-align: left;
+  color: #ffffff;
+  font-size: 14pt;
+  width: 50%;
+  height: 73%;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+#captureImage {
+  display: none;
+  position: absolute;
+  bottom: 0;
+  left: 1050px;
+  z-index: 9;
+  background-color: rgba(0, 0, 0, 0.75);
+  background-repeat: no-repeat;
+  background-size: cover;
+  border: 1px solid #ffff00;
+  width: 300px;
+  height: 150px;
+  padding: 10px;
+}
+#videoStatus {
+  display: none;
+  position: absolute;
+  top: 128px;
+  left: 0;
+  z-index: 5;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding-left: 25px;
+  padding-right: 25px;
+  padding-bottom: 25px;
+  padding-top: 15px;
+  text-align: left;
+  color: #ffffff;
+  font-size: 14pt;
+  width: 50%;
+  height: 73%;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+#playerStatus {
+  display: none;
+  position: absolute;
+  top: 128px;
+  left: 0;
+  z-index: 5;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding-left: 25px;
+  padding-right: 25px;
+  padding-bottom: 25px;
+  padding-top: 15px;
+  text-align: left;
+  color: #ffffff;
+  font-size: 14pt;
+  width: 50%;
+  height: 73%;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+#writeStatus {
+  display: none;
+  position: absolute;
+  top: 128px;
+  left: 0;
+  z-index: 5;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding-left: 25px;
+  padding-right: 25px;
+  padding-bottom: 25px;
+  padding-top: 15px;
+  text-align: left;
+  color: #ffffff;
+  font-size: 14pt;
+  width: 50%;
+  height: 73%;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+#downResult {
+  display: block;
+  color: #ffffff;
+  padding: 4px;
+  padding-top: 0;
+  width: 100%;
+  text-align: left;
+  font-size: 22px;
+}
+#lastStatus {
+  display: block;
+  position: fixed;
+  bottom: 65px;
+  left: 0;
+  z-index: 9;
+  background-color: #ffff00;
+  padding: 15px;
+  padding-left: 25px;
+  padding-right: 25px;
+  text-align: left;
+  color: #000000;
+  font-size: 24pt;
+  width: 50%;
+  height: 3%;
+}
+#backStatus {
+  display: block;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  z-index: 9;
+  background-color: #ffff00;
+  padding: 15px;
+  padding-left: 25px;
+  padding-right: 25px;
+  text-align: left;
+  color: #000000;
+  font-size: 24pt;
+  width: 50%;
+  height: 3%;
+}
+#internetStatus {
+  display: block;
+  position: absolute;
+  top: 25px;
+  right: 25px;
+  z-index: 9;
+  background-color: rgba(255, 0, 0, 0.75);
+  padding: 10px;
+  border-radius: 15px;
+  text-align: right;
+  color: #000000;
+  font-size: 14pt;
+}
+#tvStartStatus {
+  display: block;
+  position: absolute;
+  top: 25px;
+  right: 250px;
+  z-index: 9;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding: 10px;
+  border-radius: 15px;
+  text-align: right;
+  color: #ffffff;
+  font-size: 14pt;
+}
+#usbLocked {
+  display: none;
+  position: absolute;
+  top: 25px;
+  left: 1020px;
+  z-index: 9;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding: 10px;
+  border-radius: 15px;
+  text-align: left;
+  color: #ffffff;
+  font-size: 14pt;
+}
+#osdLocked {
+  display: none;
+  position: absolute;
+  top: 25px;
+  left: 1150px;
+  z-index: 9;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding: 10px;
+  border-radius: 15px;
+  text-align: left;
+  color: #ffffff;
+  font-size: 14pt;
+}
+#shareScreenLocked {
+  display: none;
+  position: absolute;
+  top: 75px;
+  left: 1020px;
+  z-index: 9;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding: 10px;
+  border-radius: 15px;
+  text-align: left;
+  color: #ffffff;
+  font-size: 14pt;
+}
+#autoNextActive {
+  display: none;
+  position: absolute;
+  top: 125px;
+  left: 1020px;
+  z-index: 9;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding: 10px;
+  border-radius: 15px;
+  text-align: left;
+  color: #ffffff;
+  font-size: 14pt;
+}
+#upgradeFirmwareStat {
+  display: none;
+  visibility: hidden;
+  position: absolute;
+  bottom: 25px;
+  right: 25px;
+  border-radius: 15px;
+  z-index: 99;
+  background-color: #fff;
+  opacity: 0.8;
+  padding: 15px;
+  text-align: center;
+  color: #000;
+  font-size: 25px;
+  min-width: 100px;
+}
+#socketStatusServer {
+  display: block;
+  position: absolute;
+  top: 75px;
+  right: 25px;
+  z-index: 9;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding: 10px;
+  border-radius: 15px;
+  text-align: right;
+  color: #ffffff;
+  font-size: 14pt;
+}
+#socketStatusClient {
+  display: block;
+  position: absolute;
+  top: 125px;
+  right: 25px;
+  z-index: 9;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding: 10px;
+  border-radius: 15px;
+  text-align: right;
+  color: #ffffff;
+  font-size: 14pt;
+}
+#socketData {
+  display: block;
+  position: absolute;
+  top: 175px;
+  right: 25px;
+  z-index: 9;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding: 10px;
+  border-radius: 15px;
+  text-align: right;
+  color: #ffffff;
+  font-size: 14pt;
+}
+#playerDebug {
+  display: block;
+  position: absolute;
+  top: 225px;
+  right: 25px;
+  z-index: 9;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding: 10px;
+  border-radius: 15px;
+  text-align: right;
+  color: #ffffff;
+  font-size: 14pt;
+}
+#userNotif {
+  display: none;
+  position: absolute;
+  bottom: 25px;
+  right: 25px;
+  border-radius: 15px;
+  z-index: 99;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding: 15px;
+  text-align: center;
+  color: #ffffff;
+  font-size: 48px;
+  min-width: 100px;
+}
+#videoPlayerFrame {
+  display: block;
+  position: absolute;
+  top: 0px;
+  left: 0px;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+#videoPlayerA {
+  /* visibility: hidden; */
+  position: absolute;
+  top: 0px;
+  right: 0px;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  opacity: 1;
+  /* transition: opacity 0.2s ease; */
+}
+#videoPlayerB {
+  /* visibility: hidden; */
+  position: absolute;
+  top: 0px;
+  left: 0px;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  opacity: 1;
+  /* transition: opacity 0.2s ease; */
+}
+#videoPlayerA.hidden {
+  opacity: 0;
+}
+#videoPlayerB.hidden {
+  opacity: 0;
+}
+#pdfPlayerFrame {
+  display: none;
+  position: absolute;
+  top: 0px;
+  left: 0px;
+  width: 100%;
+  height: 100%;
+}
+#qrblock {
+  display: none;
+  position: absolute;
+  position: absolute;
+  padding: 0px;
+  bottom: 0;
+  right: 0;
+  z-index: 9;
+  background-color: #033b0b;
+  height: 600px;
+  width: 600px;
+}
+#qrcode {
+  display: block;
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  z-index: 9;
+  margin: 10px;
+}

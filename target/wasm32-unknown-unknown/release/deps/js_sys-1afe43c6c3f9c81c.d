@@ -1,0 +1,10 @@
+C:\Users\DMM User\Documents\GitHub\RUST-LG\target\wasm32-unknown-unknown\release\deps\libjs_sys-1afe43c6c3f9c81c.rmeta: C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src/lib.rs C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src\futures\mod.rs C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src\futures\queue.rs C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src\futures\task\singlethread.rs
+
+C:\Users\DMM User\Documents\GitHub\RUST-LG\target\wasm32-unknown-unknown\release\deps\libjs_sys-1afe43c6c3f9c81c.rlib: C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src/lib.rs C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src\futures\mod.rs C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src\futures\queue.rs C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src\futures\task\singlethread.rs
+
+C:\Users\DMM User\Documents\GitHub\RUST-LG\target\wasm32-unknown-unknown\release\deps\js_sys-1afe43c6c3f9c81c.d: C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src/lib.rs C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src\futures\mod.rs C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src\futures\queue.rs C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src\futures\task\singlethread.rs
+
+C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src/lib.rs:
+C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src\futures\mod.rs:
+C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src\futures\queue.rs:
+C:\Users\DMM\ User\.cargo\registry\src\index.crates.io-6f17d22bba15001f\js-sys-0.3.99\src\futures\task\singlethread.rs:

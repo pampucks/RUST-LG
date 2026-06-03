@@ -1,9 +1,19 @@
+pub mod config;
+
 use wasm_bindgen::prelude::*;
+use web_sys::window;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 
-// --- 1. CORE ARCHITECTURE STRUCTURES ---
+// --- 1. CORE ARCHITECTURE ENUMS & STRUCTS ---
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub enum PlaybackEngineLayout {
+    ModernDualBuffer, // For WebOS 3.0 and 4.0+
+    LegacySingleNode,  // For WebOS 2.0
+    Unassigned,
+}
 
 #[derive(Serialize, Clone, Debug, Default)]
 pub struct NetworkInterface {
@@ -69,6 +79,10 @@ pub struct CoreState {
     pub current_brightness: u8,
     pub hardware_fault_detected: bool,
     pub pending_transactions: HashMap<u64, PendingTransaction>,
+
+    // Dynamic Hardware Routing Properties
+    pub webos_version: u32,
+    pub dynamic_layout: PlaybackEngineLayout,
 }
 
 thread_local! {
@@ -89,6 +103,8 @@ thread_local! {
         current_brightness: 50,
         hardware_fault_detected: false,
         pending_transactions: HashMap::new(),
+        webos_version: 0,
+        dynamic_layout: PlaybackEngineLayout::Unassigned,
     });
 }
 
@@ -103,16 +119,76 @@ pub struct IncomingCommand {
 // --- 2. BINDINGS TO JAVASCRIPT ---
 #[wasm_bindgen]
 extern "C" {
-    #[wasm_bindgen(js_name = log)]
+    // Maps the browser's console.log directly to the name 'js_log' inside Rust
+    #[wasm_bindgen(js_namespace = console, js_name = log)]
     fn js_log(s: &str);
+
+    // Tells Rust that a global JavaScript function named scapCallbackBridge exists
     fn scapCallbackBridge(s: &str);
 }
 
-fn log(msg: &str) {
-    js_log(msg);
+fn log(s: &str) {
+    js_log(s);
 }
 
-// --- 3. UNIFIED COMMAND PARSER & ROUTER ---
+// --- 3. HARDWARE ROUTING LOGIC ---
+
+#[wasm_bindgen]
+pub fn evaluate_hardware_routing(version: u32) {
+    CORE_STATE.with(|state| {
+        let mut s = state.borrow_mut();
+        s.webos_version = version;
+        if version >= 3 {
+            s.dynamic_layout = PlaybackEngineLayout::ModernDualBuffer;
+        } else {
+            s.dynamic_layout = PlaybackEngineLayout::LegacySingleNode;
+        }
+    });
+    
+    let window = window().expect("Global Window Context Missing");
+    let document = window.document().expect("DOM Document Missing");
+    
+    if let Some(stats_div) = document.get_element_by_id("processStats") {
+        stats_div.set_inner_html(&format!("WebOS Version Identified: v{}", version));
+    }
+    
+    let closure = Closure::wrap(Box::new(move || {
+        let doc = web_sys::window().unwrap().document().unwrap();
+        
+        if let Some(boot) = doc.get_element_by_id("bootScreen") {
+            let html_el: web_sys::HtmlElement = boot.dyn_into().unwrap();
+            html_el.style().set_property("display", "none").unwrap();
+        }
+        
+        let dual_frame = doc.get_element_by_id("videoPlayerFrame");
+        let legacy_video = doc.get_element_by_id("legacyVideoPlayer");
+        let legacy_poster = doc.get_element_by_id("videoPoster");
+        
+        if version >= 3 {
+            js_log("[Core Routing] Selecting Modern Dual Alternating Node Layout View.");
+            if let Some(df) = dual_frame {
+                df.dyn_into::<web_sys::HtmlElement>().unwrap().style().set_property("display", "block").unwrap();
+            }
+        } else {
+            js_log("[Core Routing] Selecting Legacy Single Viewport Node Layout View.");
+            if let Some(lv) = legacy_video {
+                lv.dyn_into::<web_sys::HtmlElement>().unwrap().style().set_property("display", "block").unwrap();
+            }
+            if let Some(lp) = legacy_poster {
+                lp.dyn_into::<web_sys::HtmlElement>().unwrap().style().set_property("display", "block").unwrap();
+            }
+        }
+    }) as Box<dyn FnMut()>);
+    
+    window.set_timeout_with_callback_and_timeout_and_arguments_0(
+        closure.as_ref().unchecked_ref(),
+        5000
+    ).unwrap();
+    
+    closure.forget();
+}
+
+// --- 4. UNIFIED COMMAND PARSER & ROUTER ---
 
 #[wasm_bindgen]
 pub fn process_signage_command(json_str: &str) {
@@ -130,12 +206,9 @@ pub fn process_signage_command(json_str: &str) {
         let payload = cmd.payload.as_ref().unwrap_or(&fallback_payload);
 
         match cmd.action.as_str() {
-            // Platform Telemetry & Diagnostics (1 - 3)
             "GET_DEVICE_INFO" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "FETCH_HARDWARE_TELEMETRY" }).to_string()),
             "GET_NETWORK_INFO" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "FETCH_NETWORK_INFO" }).to_string()),
             "GET_STORAGE_INFO" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "FETCH_STORAGE_INFO" }).to_string()),
-            
-            // App Lifecycle & Asset Sync (4 - 12)
             "UPGRADE_APPLICATION" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_APP_UPGRADE", "options": payload }).to_string()),
             "COPY_FILE" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_COPY_FILE", "options": payload }).to_string()),
             "CHECK_FILE_EXISTS" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_FILE_EXISTS", "options": payload }).to_string()),
@@ -145,13 +218,9 @@ pub fn process_signage_command(json_str: &str) {
             "REMOVE_FILE" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_REMOVE_FILE", "options": payload }).to_string()),
             "WRITE_FILE" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_WRITE_FILE", "options": payload }).to_string()),
             "REMOVE_ALL_FILES" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_REMOVE_ALL", "options": payload }).to_string()),
-            
-            // Proof-of-Play Screen Capture & Timing Control (13 - 15)
             "CAPTURE_SCREEN" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_SCREEN_CAPTURE", "options": payload }).to_string()),
             "GET_CURRENT_TIME" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "FETCH_CURRENT_TIME" }).to_string()),
             "SET_SERVER_PROPERTY" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_SET_SERVER", "options": payload }).to_string()),
-            
-            // Deployment & Power Subsystems (16 - 24)
             "RESTART_APPLICATION" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_APP_RESTART" }).to_string()),
             "GET_SERVER_PROPERTY" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "FETCH_SERVER_PROPERTY" }).to_string()),
             "EXECUTE_POWER_COMMAND" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_POWER_CMD", "options": payload }).to_string()),
@@ -161,13 +230,12 @@ pub fn process_signage_command(json_str: &str) {
             "ADD_OFF_TIMER" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_ADD_OFF_TIMER", "options": payload }).to_string()),
             "ENABLE_ALL_ON_TIMER" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_ENABLE_ALL_ON", "options": payload }).to_string()),
             "ENABLE_ALL_OFF_TIMER" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_ENABLE_ALL_OFF", "options": payload }).to_string()),
-
             _ => log(&format!("[Rust Core] Warning: Unhandled command route: {}", cmd.action)),
         }
     }
 }
 
-// --- 4. HARDWARE TELEMETRY INGESTION ENGINE ---
+// --- 5. HARDWARE TELEMETRY INGESTION ENGINE ---
 
 #[wasm_bindgen]
 pub fn process_hardware_event(json_str: &str) {
@@ -261,7 +329,7 @@ pub fn process_hardware_event(json_str: &str) {
 
 #[wasm_bindgen]
 pub fn check_transaction_timeouts(current_time_ms: f64) {
-    let timeout_threshold_ms = 8000.0; // Extra padding to ensure long file IO, network captures, or power sweeps do not trip early
+    let timeout_threshold_ms = 8000.0; 
     let mut timed_out_ids: Vec<u64> = Vec::new();
 
     CORE_STATE.with(|state| {

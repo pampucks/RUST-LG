@@ -1,1 +1,1 @@
-C:\Users\DMM\ User\Documents\GitHub\RUST-LG\target\wasm32-unknown-unknown\release\rust_lg_adapter.wasm: C:\Users\DMM\ User\Documents\GitHub\RUST-LG\src\lib.rs
+C:\Users\DMM\ User\Documents\GitHub\RUST-LG\target\wasm32-unknown-unknown\release\rust_lg_adapter.wasm: C:\Users\DMM\ User\Documents\GitHub\RUST-LG\src\config.rs C:\Users\DMM\ User\Documents\GitHub\RUST-LG\src\lib.rs
