@@ -5,6 +5,39 @@ use serde::{Serialize, Deserialize};
 
 // --- 1. CORE ARCHITECTURE STRUCTURES ---
 
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct NetworkInterface {
+    pub state: String,
+    pub method: String,
+    pub ip_address: String,
+    pub netmask: String,
+    pub dns1: String,
+    pub dns2: String,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct StorageMetrics {
+    pub total_kb: f64,
+    pub free_kb: f64,
+    pub used_kb: f64,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct ServerProperties {
+    pub server_ip: String,
+    pub server_port: u32,
+    pub app_launch_mode: String,
+    pub fqdn_addr: String,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct HardwareTimer {
+    pub hour: u32,
+    pub minute: u32,
+    pub week: u32,
+    pub input_source: Option<String>,
+}
+
 #[derive(Serialize, Clone, Debug)]
 pub struct PendingTransaction {
     pub action: String,
@@ -13,42 +46,61 @@ pub struct PendingTransaction {
 
 #[derive(Serialize, Clone, Debug)]
 pub struct CoreState {
-    pub device_model: String,
+    // Platform Identifiers
+    pub model_name: String,
     pub firmware_version: String,
+    pub hardware_version: String,
+    pub sdk_version: String,
+    pub serial_number: String,
+    
+    // Telemetry, Configurations & Networks
+    pub is_internet_available: bool,
+    pub panel_time_info: String,
+    pub server_config: ServerProperties,
+    pub wired_network: NetworkInterface,
+    pub wifi_network: NetworkInterface,
+    pub internal_storage: StorageMetrics,
+    
+    // Hardware Power Automation Schedules
+    pub scheduled_on_timers: Vec<HardwareTimer>,
+    pub scheduled_off_timers: Vec<HardwareTimer>,
+    
+    // Control & Fault Status
     pub current_brightness: u8,
     pub hardware_fault_detected: bool,
     pub pending_transactions: HashMap<u64, PendingTransaction>,
 }
 
-// Thread-local storage guarantees safe memory accessibility inside the WASM boundary
 thread_local! {
     static CORE_STATE: RefCell<CoreState> = RefCell::new(CoreState {
-        device_model: String::from("Unknown"),
+        model_name: String::from("Unknown"),
         firmware_version: String::from("Unknown"),
-        current_brightness: 50, // Default baseline fallback
+        hardware_version: String::from("Unknown"),
+        sdk_version: String::from("Unknown"),
+        serial_number: String::from("Unknown"),
+        is_internet_available: false,
+        panel_time_info: String::from("Unknown"),
+        server_config: ServerProperties::default(),
+        wired_network: NetworkInterface::default(),
+        wifi_network: NetworkInterface::default(),
+        internal_storage: StorageMetrics::default(),
+        scheduled_on_timers: Vec::new(),
+        scheduled_off_timers: Vec::new(),
+        current_brightness: 50,
         hardware_fault_detected: false,
         pending_transactions: HashMap::new(),
     });
 }
 
-// Input JSON structures mapping your JS commands
 #[derive(Deserialize, Debug)]
 pub struct IncomingCommand {
     pub req_id: u64,
     pub action: String,
     pub payload: Option<serde_json::Value>,
-    pub client_timestamp_ms: Option<f64>, // Passed from JS to drive the watchdog
-}
-
-#[derive(Serialize, Debug)]
-pub struct OutgoingHardwareRequest {
-    pub req_id: u64,
-    pub action: String,
-    pub value: u8,
+    pub client_timestamp_ms: Option<f64>,
 }
 
 // --- 2. BINDINGS TO JAVASCRIPT ---
-
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_name = log)]
@@ -60,68 +112,68 @@ fn log(msg: &str) {
     js_log(msg);
 }
 
-// --- 3. MAIN WASM ENGINE LOGIC ---
+// --- 3. UNIFIED COMMAND PARSER & ROUTER ---
 
 #[wasm_bindgen]
 pub fn process_signage_command(json_str: &str) {
-    log("[Rust Core] Incoming command string received.");
-
     if let Ok(cmd) = serde_json::from_str::<IncomingCommand>(json_str) {
         let timestamp = cmd.client_timestamp_ms.unwrap_or(0.0);
 
+        CORE_STATE.with(|state| {
+            state.borrow_mut().pending_transactions.insert(cmd.req_id, PendingTransaction {
+                action: cmd.action.clone(),
+                created_at_ms: timestamp,
+            });
+        });
+
+        let fallback_payload = serde_json::json!({});
+        let payload = cmd.payload.as_ref().unwrap_or(&fallback_payload);
+
         match cmd.action.as_str() {
-            "SET_BRIGHTNESS" => {
-                let target_brightness = cmd.payload
-                    .and_then(|p| p.get("target").and_then(|t| t.as_u64()))
-                    .unwrap_or(50) as u8;
+            // Platform Telemetry & Diagnostics (1 - 3)
+            "GET_DEVICE_INFO" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "FETCH_HARDWARE_TELEMETRY" }).to_string()),
+            "GET_NETWORK_INFO" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "FETCH_NETWORK_INFO" }).to_string()),
+            "GET_STORAGE_INFO" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "FETCH_STORAGE_INFO" }).to_string()),
+            
+            // App Lifecycle & Asset Sync (4 - 12)
+            "UPGRADE_APPLICATION" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_APP_UPGRADE", "options": payload }).to_string()),
+            "COPY_FILE" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_COPY_FILE", "options": payload }).to_string()),
+            "CHECK_FILE_EXISTS" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_FILE_EXISTS", "options": payload }).to_string()),
+            "READ_FILE" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_READ_FILE", "options": payload }).to_string()),
+            "LIST_FILES" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_LIST_FILES", "options": payload }).to_string()),
+            "STAT_FILE" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_STAT_FILE", "options": payload }).to_string()),
+            "REMOVE_FILE" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_REMOVE_FILE", "options": payload }).to_string()),
+            "WRITE_FILE" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_WRITE_FILE", "options": payload }).to_string()),
+            "REMOVE_ALL_FILES" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_REMOVE_ALL", "options": payload }).to_string()),
+            
+            // Proof-of-Play Screen Capture & Timing Control (13 - 15)
+            "CAPTURE_SCREEN" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_SCREEN_CAPTURE", "options": payload }).to_string()),
+            "GET_CURRENT_TIME" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "FETCH_CURRENT_TIME" }).to_string()),
+            "SET_SERVER_PROPERTY" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_SET_SERVER", "options": payload }).to_string()),
+            
+            // Deployment & Power Subsystems (16 - 24)
+            "RESTART_APPLICATION" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_APP_RESTART" }).to_string()),
+            "GET_SERVER_PROPERTY" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "FETCH_SERVER_PROPERTY" }).to_string()),
+            "EXECUTE_POWER_COMMAND" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_POWER_CMD", "options": payload }).to_string()),
+            "GET_ON_TIMER_LIST" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "FETCH_ON_TIMER_LIST" }).to_string()),
+            "GET_OFF_TIMER_LIST" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "FETCH_OFF_TIMER_LIST" }).to_string()),
+            "ADD_ON_TIMER" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_ADD_ON_TIMER", "options": payload }).to_string()),
+            "ADD_OFF_TIMER" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_ADD_OFF_TIMER", "options": payload }).to_string()),
+            "ENABLE_ALL_ON_TIMER" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_ENABLE_ALL_ON", "options": payload }).to_string()),
+            "ENABLE_ALL_OFF_TIMER" => scapCallbackBridge(&serde_json::json!({ "req_id": cmd.req_id, "action": "EXECUTE_ENABLE_ALL_OFF", "options": payload }).to_string()),
 
-                // Track the transaction before dispatching
-                CORE_STATE.with(|state| {
-                    state.borrow_mut().pending_transactions.insert(cmd.req_id, PendingTransaction {
-                        action: String::from("SET_BRIGHTNESS"),
-                        created_at_ms: timestamp,
-                    });
-                });
-
-                let hardware_req = OutgoingHardwareRequest {
-                    req_id: cmd.req_id,
-                    action: String::from("SET_PICTURE_PROPERTY"),
-                    value: target_brightness,
-                };
-
-                if let Ok(out_str) = serde_json::to_string(&hardware_req) {
-                    scapCallbackBridge(&out_str);
-                }
-            },
-
-            "GET_DEVICE_INFO" => {
-                CORE_STATE.with(|state| {
-                    state.borrow_mut().pending_transactions.insert(cmd.req_id, PendingTransaction {
-                        action: String::from("GET_DEVICE_INFO"),
-                        created_at_ms: timestamp,
-                    });
-                });
-
-                let telemetry_req = serde_json::json!({
-                    "req_id": cmd.req_id,
-                    "action": "FETCH_HARDWARE_TELEMETRY"
-                });
-                scapCallbackBridge(&telemetry_req.to_string());
-            },
-
-            _ => log(&format!("[Rust Core] Warning: Unhandled action: {}", cmd.action)),
+            _ => log(&format!("[Rust Core] Warning: Unhandled command route: {}", cmd.action)),
         }
-    } else {
-        log("[Rust Core] Error: Could not parse incoming application payload.");
     }
 }
+
+// --- 4. HARDWARE TELEMETRY INGESTION ENGINE ---
 
 #[wasm_bindgen]
 pub fn process_hardware_event(json_str: &str) {
     if let Ok(evt) = serde_json::from_str::<serde_json::Value>(json_str) {
         if let Some(req_id) = evt.get("req_id").and_then(|r| r.as_u64()) {
             
-            // Resolve flight status from memory ledger
             let mut matched_action = String::from("Unknown");
             CORE_STATE.with(|state| {
                 if let Some(tx) = state.borrow_mut().pending_transactions.remove(&req_id) {
@@ -129,48 +181,87 @@ pub fn process_hardware_event(json_str: &str) {
                 }
             });
 
-            // 1. Process Telemetry Callback
-            if let Some(event_type) = evt.get("event_type").and_then(|e| e.as_str()) {
-                if event_type == "DEVICE_INFO_CALLBACK" {
-                    if let Some(payload) = evt.get("payload") {
-                        let model = payload.get("model").and_then(|m| m.as_str()).unwrap_or("Unknown");
-                        let fw = payload.get("firmware").and_then(|f| f.as_str()).unwrap_or("Unknown");
-                        
-                        CORE_STATE.with(|state| {
-                            let mut s = state.borrow_mut();
-                            s.device_model = model.to_string();
-                            s.firmware_version = fw.to_string();
-                        });
-                        log("[Rust Core State] Device info telemetry persisted successfully.");
-                    }
+            if let Some(status) = evt.get("hardware_status").and_then(|s| s.as_str()) {
+                if status == "FAILED" {
+                    log(&format!("[Rust Core State] CRITICAL: Action '{}' failed at SCAP level.", matched_action));
+                    CORE_STATE.with(|state| state.borrow_mut().hardware_fault_detected = true);
                     return;
                 }
             }
 
-            // 2. Process Control Confirmations
-            if let Some(status) = evt.get("hardware_status").and_then(|s| s.as_str()) {
-                if status == "APPLIED" {
-                    log(&format!("[Rust Core State] Transaction #{} marked OK. Action '{}' complete.", req_id, matched_action));
-                    // If brightness was applied, optimize state assuming execution targets met
-                    if matched_action == "SET_BRIGHTNESS" {
-                        CORE_STATE.with(|state| {
-                            state.borrow_mut().current_brightness = 20; // Or passed back via detailed schema payload
-                        });
+            if let Some(event_type) = evt.get("event_type").and_then(|e| e.as_str()) {
+                CORE_STATE.with(|state| {
+                    let mut s = state.borrow_mut();
+                    match event_type {
+                        "DEVICE_INFO_CALLBACK" => {
+                            if let Some(p) = evt.get("payload") {
+                                s.model_name = p.get("modelName").and_then(|m| m.as_str()).unwrap_or("").to_string();
+                                s.firmware_version = p.get("firmwareVersion").and_then(|m| m.as_str()).unwrap_or("").to_string();
+                                s.hardware_version = p.get("hardwareVersion").and_then(|m| m.as_str()).unwrap_or("").to_string();
+                                s.sdk_version = p.get("sdkVersion").and_then(|m| m.as_str()).unwrap_or("").to_string();
+                                s.serial_number = p.get("serialNumber").and_then(|m| m.as_str()).unwrap_or("").to_string();
+                            }
+                        },
+                        "NETWORK_INFO_CALLBACK" => {
+                            if let Some(p) = evt.get("payload") {
+                                s.is_internet_available = p.get("isInternetConnectionAvailable").and_then(|b| b.as_bool()).unwrap_or(false);
+                            }
+                        },
+                        "STORAGE_INFO_CALLBACK" => {
+                            if let Some(p) = evt.get("payload") {
+                                s.internal_storage.total_kb = p.get("total").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                s.internal_storage.free_kb = p.get("free").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                s.internal_storage.used_kb = p.get("used").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                            }
+                        },
+                        "SERVER_PROPERTY_CALLBACK" => {
+                            if let Some(p) = evt.get("payload") {
+                                s.server_config.server_ip = p.get("serverIp").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                s.server_config.server_port = p.get("serverPort").and_then(|v| v.as_u64()).unwrap_or(80) as u32;
+                                s.server_config.app_launch_mode = p.get("appLaunchMode").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                s.server_config.fqdn_addr = p.get("fqdnAddr").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            }
+                        },
+                        "ON_TIMER_LIST_CALLBACK" => {
+                            if let Some(timer_list) = evt.get("payload").and_then(|p| p.get("timerList")).and_then(|l| l.as_array()) {
+                                s.scheduled_on_timers = timer_list.iter().map(|t| HardwareTimer {
+                                    hour: t.get("hour").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                                    minute: t.get("minute").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                                    week: t.get("week").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                                    input_source: t.get("inputSource").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                }).collect();
+                                log("[Rust Core State] Internal On-Timer layout synchronization baseline marked OK.");
+                            }
+                        },
+                        "OFF_TIMER_LIST_CALLBACK" => {
+                            if let Some(timer_list) = evt.get("payload").and_then(|p| p.get("timerList")).and_then(|l| l.as_array()) {
+                                s.scheduled_off_timers = timer_list.iter().map(|t| HardwareTimer {
+                                    hour: t.get("hour").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                                    minute: t.get("minute").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                                    week: t.get("week").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                                    input_source: None,
+                                }).collect();
+                                log("[Rust Core State] Internal Off-Timer layout synchronization baseline marked OK.");
+                            }
+                        },
+                        "TIME_INFO_CALLBACK" => {
+                            if let Some(p) = evt.get("payload") {
+                                s.panel_time_info = serde_json::to_string(p).unwrap_or_default();
+                            }
+                        },
+                        _ => {
+                            log(&format!("[Rust Core State] Action Complete Event -> {} transaction resolved cleanly.", event_type));
+                        }
                     }
-                } else if status == "FAILED" {
-                    log(&format!("[Rust Core State] CRITICAL: Transaction #{} failed at hardware layer.", req_id));
-                    CORE_STATE.with(|state| state.borrow_mut().hardware_fault_detected = true);
-                }
+                });
             }
         }
     }
 }
 
-// --- 4. SAFETY WATCHDOG & INSPECTION UTILITIES ---
-
 #[wasm_bindgen]
 pub fn check_transaction_timeouts(current_time_ms: f64) {
-    let timeout_threshold_ms = 3000.0; // 3 Seconds SCAP execution guard
+    let timeout_threshold_ms = 8000.0; // Extra padding to ensure long file IO, network captures, or power sweeps do not trip early
     let mut timed_out_ids: Vec<u64> = Vec::new();
 
     CORE_STATE.with(|state| {
@@ -188,7 +279,7 @@ pub fn check_transaction_timeouts(current_time_ms: f64) {
             s.hardware_fault_detected = true;
             for id in timed_out_ids {
                 if let Some(tx) = s.pending_transactions.remove(&id) {
-                    js_log(&format!("[WATCHDOG PANIC] Transaction #{} ({}) completely hung. Hardware dropped request!", id, tx.action));
+                    js_log(&format!("[WATCHDOG PANIC] SCAP Hardware execution timeout on Transaction #{} ({})", id, tx.action));
                 }
             }
         });
@@ -197,7 +288,5 @@ pub fn check_transaction_timeouts(current_time_ms: f64) {
 
 #[wasm_bindgen]
 pub fn get_core_state() -> String {
-    CORE_STATE.with(|state| {
-        serde_json::to_string(&*state.borrow()).unwrap_or_else(|_| String::from("{}"))
-    })
+    CORE_STATE.with(|state| serde_json::to_string(&*state.borrow()).unwrap_or_else(|_| String::from("{}")))
 }

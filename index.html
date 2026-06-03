@@ -1,7 +1,7 @@
 <!doctype html>
 <html>
   <head>
-    <title>Rust LG SCAP Sandbox</title>
+    <title>Rust LG SCAP Sandbox (webOS 6+)</title>
     <style>
       body {
         background-color: #121214;
@@ -46,14 +46,13 @@
     </style>
 
     <script src="SCAP_Library-official-1.8.2-20260127/js/webOS.js"></script>
-
     <script src="SCAP_Library-official-1.8.2-20260127/js/cordova/2.7.0/cordova.webos.js"></script>
-
     <script src="SCAP_Library-official-1.8.2-20260127/js/custom.js"></script>
-
     <script src="SCAP_Library-official-1.8.2-20260127/js/cordova-cd/deviceInfo.js"></script>
-
     <script src="SCAP_Library-official-1.8.2-20260127/js/cordova-cd/configuration.js"></script>
+    <script src="SCAP_Library-official-1.8.2-20260127/js/cordova-cd/storage.js"></script>
+    <script src="SCAP_Library-official-1.8.2-20260127/js/cordova-cd/signage.js"></script>
+    <script src="SCAP_Library-official-1.8.2-20260127/js/cordova-cd/power.js"></script>
 
     <script src="adapter.js"></script>
   </head>
@@ -67,9 +66,12 @@
     </div>
 
     <script type="module">
+      // FIX: Imported all required compiled methods from your Rust build
       import init, {
         process_signage_command,
         process_hardware_event,
+        check_transaction_timeouts,
+        get_core_state,
       } from "./pkg/rust_lg_adapter.js";
 
       window.onload = function () {
@@ -106,7 +108,6 @@
                 )
               );
             };
-
             xhr.send();
           });
         }
@@ -116,26 +117,30 @@
           .then(function (wasmArrayBuffer) {
             term.innerHTML +=
               "<br>> [Disk I/O] Successfully read WASM bytes via local XHR channel.";
-
-            // 2. Explicitly compile the raw bytes into a WebAssembly Module object in memory
+            // 2. Explicitly compile the raw bytes into a WebAssembly Module object
             return WebAssembly.compile(wasmArrayBuffer);
           })
           .then(function (compiledWasmModule) {
             term.innerHTML +=
               "<br>> [Compiler] WebAssembly binary compiled into memory module target.";
-
             // 3. Initialize the engine using the pre-compiled module
             return init({ module_or_path: compiledWasmModule });
           })
           .then(function () {
             document.getElementById("sandboxStatus").innerText =
               "Rust Engine Online.";
+
+            // ⚡ ADD THIS LINE HERE TO CHANNELS RUST LOGS TO YOUR CONSOLE
+            window.log = console.log;
+
             term.innerHTML +=
               "<br>> [WASM] Core binary memory map bound successfully via ArrayBuffer payload.";
 
-            // Map the compiled Rust entry functions explicitly to the window space
+            // FIX: Map EVERY compiled Rust entry function explicitly to the window space
             window.rust_process_signage_command = process_signage_command;
             window.rust_process_hardware_event = process_hardware_event;
+            window.rust_check_transaction_timeouts = check_transaction_timeouts;
+            window.rust_get_core_state = get_core_state;
 
             // Fire up our system bridge command pipeline
             onAppStart();
@@ -150,7 +155,6 @@
         // Listen for the app coming back from the background
         document.addEventListener("visibilitychange", function () {
           if (document.visibilityState === "visible") {
-            // FIX: Add safety guard check so it doesn't interrupt initial boot
             if (typeof window.rust_process_signage_command === "function") {
               console.log(
                 "[JS Sandbox] App resumed from background. Forcing hardware sync..."
@@ -158,10 +162,6 @@
               if (typeof onAppStart === "function") {
                 onAppStart();
               }
-            } else {
-              console.log(
-                "[JS Sandbox] App visibility triggered during initial boot. Deferring to WASM lifecycle."
-              );
             }
           }
         });
