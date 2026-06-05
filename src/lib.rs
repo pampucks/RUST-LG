@@ -100,6 +100,27 @@ pub struct CoreState {
     pub video_folder_local: String,
     pub file_jadwal: String,
     pub jadwal_dicek: String,
+    pub nama_sesi_jadwal: String,
+    pub nama_text_file: String,
+    pub sync_playlist_update: String,
+    pub sync_size_update: String,
+    pub missing_files: Vec<String>,
+    pub video_counter: usize,
+    pub downloading: u8,
+    pub checking: u8,
+    pub total_file_size: u64,
+    pub log_request: bool,
+    pub file_log: String,
+    pub array_log: Vec<String>,
+    pub target_url_check_ipk: String,
+    pub target_url_upgrade_ipk: String,
+    pub target_device_app_version: String,
+    pub in_process_upgrade_ipk: u8,
+    pub is_upgrading: u8,
+    pub app_type_var: String,
+    pub app_launch_mode: String,
+    pub app_fqdn_mode: bool,
+    pub model_name_split: String,
 
     // Playlist state
     pub playlist_entries: Vec<PlaylistEntry>,
@@ -109,6 +130,7 @@ pub struct CoreState {
     pub running_playlist_sig: String,
     pub is_initial: u8,
     pub has_run: bool,
+    pub background_services_started: bool,
 }
 
 thread_local! {
@@ -146,6 +168,27 @@ thread_local! {
         video_folder_local: String::from(CONFIG.video_folder_local),
         file_jadwal: String::from(""),
         jadwal_dicek: String::from(""),
+        nama_sesi_jadwal: String::from(""),
+        nama_text_file: String::from(""),
+        sync_playlist_update: String::from(""),
+        sync_size_update: String::from(""),
+        missing_files: Vec::new(),
+        video_counter: 0,
+        downloading: 0,
+        checking: 0,
+        total_file_size: 0,
+        log_request: false,
+        file_log: String::new(),
+        array_log: Vec::new(),
+        target_url_check_ipk: String::from(CONFIG.url_check_ipk_version),
+        target_url_upgrade_ipk: String::from(CONFIG.url_upgrade_ipk),
+        target_device_app_version: String::from(CONFIG.device_app_version),
+        in_process_upgrade_ipk: 0,
+        is_upgrading: 0,
+        app_type_var: String::from("ipk"),
+        app_launch_mode: String::from("local"),
+        app_fqdn_mode: true,
+        model_name_split: String::new(),
         playlist_entries: Vec::new(),
         active_playlist_id: 0,
         active_content_id: 0,
@@ -153,6 +196,7 @@ thread_local! {
         running_playlist_sig: String::new(),
         is_initial: 1,
         has_run: false,
+        background_services_started: false,
     });
     // A safe thread-local queue to hold incoming hardware responses
     static HARDWARE_EVENT_QUEUE: RefCell<VecDeque<String>> = RefCell::new(VecDeque::new());
@@ -231,6 +275,249 @@ fn set_dom_style(id: &str, property: &str, value: &str) {
             }
         }
     }
+}
+
+fn schedule_tick(callback_name: &str, delay_ms: i32) {
+    let js_code = format!("setTimeout(function(){{ if(typeof window.{} === 'function') window.{}(); }}, {})", 
+        callback_name, callback_name, delay_ms);
+    let window = window().unwrap();
+    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+        &js_sys::Function::new_no_args(&js_code),
+        delay_ms,
+    );
+}
+
+fn start_background_services() {
+    let already_started = CORE_STATE.with(|state| {
+        let s = state.borrow();
+        s.background_services_started
+    });
+
+    if already_started {
+        return;
+    }
+
+    CORE_STATE.with(|state| {
+        state.borrow_mut().background_services_started = true;
+        state.borrow_mut().has_run = true;
+    });
+
+    log("[Rust BG] Starting background services...");
+
+    // Check playlist: 20 detik
+    schedule_tick("rust_tick_check_playlist", 20_000);
+
+    // Check connection: 60 detik
+    schedule_tick("rust_tick_check_connection", 60_000);
+
+    // Check content (updateContent): 15 detik pertama, lalu 30 menit
+    schedule_tick("rust_tick_check_content", 15_000);
+
+    // Update status (updateDownload): 40 menit
+    schedule_tick("rust_tick_update_status", 2_400_000);
+
+    // Sync capture: 50 menit
+    schedule_tick("rust_tick_sync_capture", 3_000_000);
+
+    // Send log: 60 menit
+    schedule_tick("rust_tick_send_log", 3_600_000);
+
+    // Check IPK version: 25 menit
+    schedule_tick("rust_tick_check_version", 1_500_000);
+
+    log("[Rust BG] All background services scheduled.");
+}
+
+#[wasm_bindgen]
+pub fn tick_check_playlist() {
+    log("[Rust BG] tick_check_playlist");
+    let cmd = CORE_STATE.with(|state| {
+        let s = state.borrow();
+        if s.jadwal_dicek.is_empty() {
+            return None;
+        }
+        let now_ms = window().unwrap().performance().unwrap().now();
+        drop(s);
+        state.borrow_mut().pending_transactions.insert(9998, PendingTransaction {
+            action: "CHECK_FILE_EXISTS".to_string(),
+            created_at_ms: now_ms,
+        });
+        let s = state.borrow();
+        Some(serde_json::json!({
+            "req_id": 9998,
+            "action": "EXECUTE_FILE_EXISTS",
+            "options": {
+                "path": format!("{}{}", s.video_folder_lg, s.jadwal_dicek)
+            }
+        }).to_string())
+    });
+
+    if let Some(c) = cmd { scapCallbackBridge(&c); }
+    schedule_tick("rust_tick_check_playlist", 20_000);
+}
+
+#[wasm_bindgen]
+pub fn tick_check_connection() {
+    log("[Rust BG] tick_check_connection");
+    let now_ms = window().unwrap().performance().unwrap().now();
+    CORE_STATE.with(|state| {
+        state.borrow_mut().pending_transactions.insert(8030, PendingTransaction {
+            action: "GET_NETWORK_INFO".to_string(),
+            created_at_ms: now_ms,
+        });
+    });
+    scapCallbackBridge(&serde_json::json!({
+        "req_id": 8030,
+        "action": "FETCH_NETWORK_INFO"
+    }).to_string());
+    schedule_tick("rust_tick_check_connection", 60_000);
+}
+
+#[wasm_bindgen]
+pub fn tick_check_content() {
+    log("[Rust BG] tick_check_content");
+    let (my_ip, kode_tv) = CORE_STATE.with(|state| {
+        let s = state.borrow();
+        (s.my_ip.clone(), s.serial_number.clone())
+    });
+
+    if my_ip == "0.0.0.0" || kode_tv.is_empty() {
+        log("[Rust BG] tick_check_content: skip, no network yet");
+        schedule_tick("rust_tick_check_content", 30_000);
+        return;
+    }
+
+    scapCallbackBridge(&serde_json::json!({
+        "req_id": 8001,
+        "action": "UPDATE_CONTENT",
+        "options": {
+            "kode_tv": kode_tv,
+            "my_ip": my_ip
+        }
+    }).to_string());
+
+    schedule_tick("rust_tick_check_content", 1_800_000);
+}
+
+#[wasm_bindgen]
+pub fn tick_update_status() {
+    log("[Rust BG] tick_update_status");
+    let (nama_sesi, kode_tv) = CORE_STATE.with(|state| {
+        let s = state.borrow();
+        (s.file_jadwal.clone(), s.serial_number.clone())
+    });
+
+    if nama_sesi.is_empty() || kode_tv.is_empty() {
+        log("[Rust BG] tick_update_status: skip, no session yet");
+        schedule_tick("rust_tick_update_status", 2_400_000);
+        return;
+    }
+
+    scapCallbackBridge(&serde_json::json!({
+        "req_id": 8002,
+        "action": "UPDATE_STATUS",
+        "options": {
+            "kode_tv": kode_tv,
+            "nama_sesi": nama_sesi
+        }
+    }).to_string());
+
+    schedule_tick("rust_tick_update_status", 2_400_000);
+}
+
+#[wasm_bindgen]
+pub fn tick_sync_capture() {
+    log("[Rust BG] tick_sync_capture");
+    let (kode_tv, _tv_app_ver, os_version) = CORE_STATE.with(|state| {
+        let s = state.borrow();
+        (s.serial_number.clone(), s.device_app_version.clone(), s.webos_version)
+    });
+
+    if kode_tv.is_empty() {
+        schedule_tick("rust_tick_sync_capture", 3_000_000);
+        return;
+    }
+
+    let now_ms = window().unwrap().performance().unwrap().now();
+    CORE_STATE.with(|state| {
+        state.borrow_mut().pending_transactions.insert(8040, PendingTransaction {
+            action: "CAPTURE_SCREEN".to_string(),
+            created_at_ms: now_ms,
+        });
+    });
+
+    scapCallbackBridge(&serde_json::json!({
+        "req_id": 8040,
+        "action": "EXECUTE_SCREEN_CAPTURE",
+        "options": {
+            "save": true,
+            "thumbnail": false,
+            "imgResolution": if os_version > 2 { "HD" } else { "SD" }
+        }
+    }).to_string());
+
+    schedule_tick("rust_tick_sync_capture", 3_000_000);
+}
+
+#[wasm_bindgen]
+pub fn tick_send_log() {
+    log("[Rust BG] tick_send_log");
+    let (kode_tv, log_request, video_folder_lg) = CORE_STATE.with(|state| {
+        let s = state.borrow();
+        (s.serial_number.clone(), s.log_request, s.video_folder_lg.clone())
+    });
+
+    if kode_tv.is_empty() || !log_request {
+        log("[Rust BG] tick_send_log: skip, log_request is false");
+        schedule_tick("rust_tick_send_log", 3_600_000);
+        return;
+    }
+
+    let now_ms = window().unwrap().performance().unwrap().now();
+    CORE_STATE.with(|state| {
+        state.borrow_mut().pending_transactions.insert(8050, PendingTransaction {
+            action: "CHECK_LOG_FILES".to_string(),
+            created_at_ms: now_ms,
+        });
+    });
+
+    scapCallbackBridge(&serde_json::json!({
+        "req_id": 8050,
+        "action": "EXECUTE_LIST_FILES",
+        "options": { "path": video_folder_lg }
+    }).to_string());
+
+    schedule_tick("rust_tick_send_log", 3_600_000);
+}
+
+#[wasm_bindgen]
+pub fn tick_check_version() {
+    log("[Rust BG] tick_check_version");
+    let (kode_tv, check_url) = CORE_STATE.with(|state| {
+        let s = state.borrow();
+        (s.serial_number.clone(), s.target_url_check_ipk.clone())
+    });
+
+    if kode_tv.is_empty() {
+        schedule_tick("rust_tick_check_version", 1_500_000);
+        return;
+    }
+
+    let now_ms = window().unwrap().performance().unwrap().now();
+    CORE_STATE.with(|state| {
+        state.borrow_mut().pending_transactions.insert(8070, PendingTransaction {
+            action: "CHECK_IPK_VERSION".to_string(),
+            created_at_ms: now_ms,
+        });
+    });
+
+    scapCallbackBridge(&serde_json::json!({
+        "req_id": 8070,
+        "action": "CHECK_IPK_VERSION",
+        "options": { "url": check_url }
+    }).to_string());
+
+    schedule_tick("rust_tick_check_version", 1_500_000);
 }
 
 // --- 3. HARDWARE ROUTING LOGIC ---
@@ -685,6 +972,7 @@ pub fn process_hardware_event(json_str: &str) {
 
                     "NETWORK_INFO_CALLBACK" => {
                         if let Some(p) = evt.get("payload") {
+                            let req_id = evt.get("req_id").and_then(|r| r.as_u64()).unwrap_or(0);
                             let mut connection_acquired = false;
                             let mut run_retry_timeout = false;
                             let mut ip_output = String::new();
@@ -728,6 +1016,10 @@ pub fn process_hardware_event(json_str: &str) {
 
                             if let Some(cmd) = find_master_cmd {
                                 scapCallbackBridge(&cmd);
+                                start_background_services();
+                            } else if req_id == 8030 {
+                                // periodic connection check — update UI saja
+                                log("[Rust BG] tick_check_connection | network status updated");
                             }
 
                             if connection_acquired {
@@ -757,18 +1049,6 @@ pub fn process_hardware_event(json_str: &str) {
                                 s.internal_storage.total_kb = p.get("total").and_then(|v| v.as_f64()).unwrap_or(0.0);
                                 s.internal_storage.free_kb = p.get("free").and_then(|v| v.as_f64()).unwrap_or(0.0);
                                 s.internal_storage.used_kb = p.get("used").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                            });
-                        }
-                    },
-
-                    "SERVER_PROPERTY_CALLBACK" => {
-                        if let Some(p) = evt.get("payload") {
-                            CORE_STATE.with(|state| {
-                                let mut s = state.borrow_mut();
-                                s.server_config.server_ip = p.get("serverIp").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                s.server_config.server_port = p.get("serverPort").and_then(|v| v.as_u64()).unwrap_or(80) as u32;
-                                s.server_config.app_launch_mode = p.get("appLaunchMode").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                s.server_config.fqdn_addr = p.get("fqdnAddr").and_then(|v| v.as_str()).unwrap_or("").to_string();
                             });
                         }
                     },
@@ -803,6 +1083,649 @@ pub fn process_hardware_event(json_str: &str) {
                         }
                     },
 
+                    "UPDATE_CONTENT_CALLBACK" => {
+                        if let Some(p) = evt.get("payload") {
+                            let status = p.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
+                            let response_text = p.get("response_text").and_then(|v| v.as_str()).unwrap_or("");
+
+                            if status != 200 || response_text.is_empty() {
+                                log(&format!("[Rust Core] updateContent | Failed | status: {}", status));
+                                set_dom_html("backStatus", "Server tidak menjawab permintaan jadwal baru");
+                                return;
+                            }
+
+                            // response = 0 artinya TV tidak terdaftar
+                            if response_text == "0" {
+                                log("[Rust Core] updateContent | TV not registered");
+                                set_dom_html("lastStatus", "ID TV tidak terdaftar. Hubungi Admin.");
+                                return;
+                            }
+
+                            let data_list: Vec<&str> = response_text.split('~').collect();
+                            if data_list.len() < 3 {
+                                log("[Rust Core] updateContent | Invalid response format");
+                                return;
+                            }
+
+                            // data_list[1] == "1" artinya tidak ada jadwal di server
+                            if data_list.get(1) == Some(&"1") {
+                                log("[Rust Core] updateContent | No schedule on server");
+                                set_dom_html("lastStatus", "Tidak ada jadwal di server. Hubungi Admin.");
+                                return;
+                            }
+
+                            let nama_sesi = data_list[0].to_string();
+                            let nama_text = format!("{}.txt", nama_sesi);
+                            let playlist_update = data_list[1].to_string();
+                            let size_update = data_list.get(2).unwrap_or(&"").to_string();
+
+                            log(&format!("[Rust Core] updateContent | Success | sesi: {}", nama_sesi));
+                            set_dom_html("backStatus", "Server menjawab permintaan jadwal baru");
+
+                            let mut check_cmd: Option<String> = None;
+                            CORE_STATE.with(|state| {
+                                let mut s = state.borrow_mut();
+                                s.nama_sesi_jadwal = nama_sesi;
+                                s.nama_text_file = nama_text;
+                                s.sync_playlist_update = playlist_update;
+                                s.sync_size_update = size_update;
+                                s.video_counter = 0;
+                                s.checking = 1;
+
+                                let now_ms = window().unwrap().performance().unwrap().now();
+                                s.pending_transactions.insert(8010, PendingTransaction {
+                                    action: "CHECK_MISSING_FILE".to_string(),
+                                    created_at_ms: now_ms,
+                                });
+
+                                check_cmd = Some(serde_json::json!({
+                                    "req_id": 8010,
+                                    "action": "EXECUTE_LIST_FILES",
+                                    "options": { "path": s.video_folder_lg }
+                                }).to_string());
+                            });
+
+                            set_dom_html("lastStatus", "Checking missing files");
+                            if let Some(cmd) = check_cmd { scapCallbackBridge(&cmd); }
+                        }
+                    },
+
+                    "LIST_FILES_CALLBACK" => {
+                        if let Some(p) = evt.get("payload") {
+                            let req_id = evt.get("req_id").and_then(|r| r.as_u64()).unwrap_or(0);
+
+                            // req 8050 = checkLocalLogFiles, bukan checkMissingFile
+                            if req_id == 8050 {
+                                let files = p.get("files").and_then(|f| f.as_array());
+                                if files.is_none() { return; }
+                                let files = files.unwrap();
+                                let mut send_cmd: Option<String> = None;
+
+                                CORE_STATE.with(|state| {
+                                    let mut s = state.borrow_mut();
+                                    s.array_log.clear();
+                                    for file in files {
+                                        let name = file.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                                        let prefix = format!("{}_", s.serial_number);
+                                        if name.contains(&prefix) {
+                                            s.array_log.push(name.to_string());
+                                        }
+                                    }
+                                    if s.array_log.is_empty() {
+                                        log("[Rust Core] checkLocalLogFiles | Tidak ada log");
+                                        return;
+                                    }
+                                    log(&format!("[Rust Core] checkLocalLogFiles | {} log belum dikirim", s.array_log.len()));
+                                    let first_log = s.array_log[0].clone();
+                                    s.file_log = first_log.clone();
+                                    let now_ms = window().unwrap().performance().unwrap().now();
+                                    s.pending_transactions.insert(8051, PendingTransaction {
+                                        action: "KIRIM_LOG".to_string(),
+                                        created_at_ms: now_ms,
+                                    });
+                                    send_cmd = Some(serde_json::json!({
+                                        "req_id": 8051,
+                                        "action": "KIRIM_LOG",
+                                        "options": {
+                                            "file_log": first_log,
+                                            "video_folder_local": s.video_folder_local,
+                                            "kode_tv": s.serial_number
+                                        }
+                                    }).to_string());
+                                });
+
+                                if let Some(cmd) = send_cmd { scapCallbackBridge(&cmd); }
+                                return;
+                            }
+
+                            let files = p.get("files").and_then(|f| f.as_array());
+                            if files.is_none() {
+                                log("[Rust Core] checkMissingFile | No files array");
+                                return;
+                            }
+                            let files = files.unwrap();
+
+                            let mut missing_files: Vec<String> = Vec::new();
+                            let mut download_cmd: Option<String> = None;
+
+                            CORE_STATE.with(|state| {
+                                let mut s = state.borrow_mut();
+                                let playlist_list: Vec<&str> = s.sync_playlist_update.split('|').collect();
+                                let size_list: Vec<&str> = s.sync_size_update.split('|').collect();
+
+                                if files.is_empty() {
+                                    // tidak ada file lokal, semua harus didownload
+                                    missing_files = playlist_list.iter().map(|f| f.to_string()).collect();
+                                } else {
+                                    for (idx, file_to_play) in playlist_list.iter().enumerate() {
+                                        let target_size = size_list.get(idx).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                                        let found = files.iter().any(|f| {
+                                            let name = f.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                                            let size = f.get("size").and_then(|s| s.as_u64()).unwrap_or(0);
+                                            name == *file_to_play && size == target_size
+                                        });
+                                        if !found {
+                                            missing_files.push(file_to_play.to_string());
+                                        }
+                                    }
+                                }
+
+                                s.checking = 0;
+
+                                if missing_files.is_empty() {
+                                    log("[Rust Core] checkMissingFile | Semua video sudah diunduh");
+                                    set_dom_html("backStatus", "Checking missing files: NO missing files");
+                                    // langsung ke jadwalDownload
+                                    s.jadwal_dicek = s.nama_text_file.clone();
+                                    let now_ms = window().unwrap().performance().unwrap().now();
+                                    s.pending_transactions.insert(8020, PendingTransaction {
+                                        action: "JADWAL_DOWNLOAD".to_string(),
+                                        created_at_ms: now_ms,
+                                    });
+                                    download_cmd = Some(serde_json::json!({
+                                        "req_id": 8020,
+                                        "action": "JADWAL_DOWNLOAD",
+                                        "options": {
+                                            "nama_text_file": s.nama_text_file,
+                                            "video_folder_lg": s.video_folder_lg
+                                        }
+                                    }).to_string());
+                                } else {
+                                    log(&format!("[Rust Core] checkMissingFile | {} video belum diunduh", missing_files.len()));
+                                    set_dom_html("backStatus", "Checking missing files: Found missing files");
+                                    s.missing_files = missing_files.clone();
+                                    s.video_counter = 0;
+                                    s.downloading = 1;
+                                    // mulai download file pertama
+                                    let first_file = &missing_files[0];
+                                    let now_ms = window().unwrap().performance().unwrap().now();
+                                    s.pending_transactions.insert(8011, PendingTransaction {
+                                        action: "CHUNK_DOWNLOAD".to_string(),
+                                        created_at_ms: now_ms,
+                                    });
+                                    download_cmd = Some(serde_json::json!({
+                                        "req_id": 8011,
+                                        "action": "EXECUTE_COPY_FILE",
+                                        "options": {
+                                            "source": format!("{}{}", CONFIG.content_download_url, first_file),
+                                            "destination": format!("{}{}", s.video_folder_lg, first_file)
+                                        }
+                                    }).to_string());
+                                    set_dom_html("lastStatus", &format!("Mengunduh {}", first_file));
+                                }
+                            });
+
+                            if let Some(cmd) = download_cmd { scapCallbackBridge(&cmd); }
+                        }
+                    },
+
+                    "COPY_FILE_CALLBACK" => {
+                        // Cek req_id untuk tau ini download video atau copy jadwal
+                        let req_id = evt.get("req_id").and_then(|r| r.as_u64()).unwrap_or(0);
+
+                        if req_id == 8021 {
+                            // Ini COPY_JADWAL selesai
+                            let mut playlist_cmd: Option<String> = None;
+                            let mut update_cmd: Option<String> = None;
+
+                            CORE_STATE.with(|state| {
+                                let mut s = state.borrow_mut();
+                                s.downloading = 0;
+                                s.jadwal_dicek = s.file_jadwal.clone();
+                                s.running_playlist_sig = String::new();
+                                log("[Rust Core] copyJadwal | Success");
+
+                                let nama_sesi_slice = s.nama_sesi_jadwal.replace(".txt", "");
+                                // let now_ms = window().unwrap().performance().unwrap().now();
+                                update_cmd = Some(serde_json::json!({
+                                    "req_id": 8022,
+                                    "action": "UPDATE_DOWNLOAD",
+                                    "options": {
+                                        "kode_tv": s.serial_number,
+                                        "nama_sesi": nama_sesi_slice
+                                    }
+                                }).to_string());
+
+                                let now_ms2 = window().unwrap().performance().unwrap().now();
+                                s.pending_transactions.insert(9994, PendingTransaction {
+                                    action: "CHECK_FILE_EXISTS".to_string(),
+                                    created_at_ms: now_ms2,
+                                });
+                                playlist_cmd = Some(serde_json::json!({
+                                    "req_id": 9994,
+                                    "action": "EXECUTE_FILE_EXISTS",
+                                    "options": {
+                                        "path": format!("{}{}", s.video_folder_lg, s.jadwal_dicek)
+                                    }
+                                }).to_string());
+                            });
+
+                            if let Some(cmd) = update_cmd { scapCallbackBridge(&cmd); }
+                            if let Some(cmd) = playlist_cmd { scapCallbackBridge(&cmd); }
+
+                        } else {
+                            // Ini chunk download video selesai
+                            let mut next_cmd: Option<String> = None;
+                            let mut log_msg = String::new();
+                            let mut status_msg = String::new();
+
+                            CORE_STATE.with(|state| {
+                                let mut s = state.borrow_mut();
+                                s.video_counter += 1;
+
+                                if s.video_counter < s.missing_files.len() {
+                                    let next_file = s.missing_files[s.video_counter].clone();
+                                    log_msg = format!("[Rust Core] chunkDownload | next: {}", next_file);
+                                    status_msg = format!("Mengunduh {}", next_file);
+
+                                    let now_ms = window().unwrap().performance().unwrap().now();
+                                    s.pending_transactions.insert(8011, PendingTransaction {
+                                        action: "CHUNK_DOWNLOAD".to_string(),
+                                        created_at_ms: now_ms,
+                                    });
+                                    next_cmd = Some(serde_json::json!({
+                                        "req_id": 8011,
+                                        "action": "EXECUTE_COPY_FILE",
+                                        "options": {
+                                            "source": format!("{}{}", CONFIG.content_download_url, next_file),
+                                            "destination": format!("{}{}", s.video_folder_lg, next_file)
+                                        }
+                                    }).to_string());
+                                } else {
+                                    s.downloading = 0;
+                                    s.video_counter = 0;
+                                    log_msg = String::from("[Rust Core] chunkDownload | Sukses mengunduh semua video");
+                                    status_msg = String::from("Sukses mengunduh semua video");
+
+                                    let now_ms = window().unwrap().performance().unwrap().now();
+                                    s.pending_transactions.insert(8020, PendingTransaction {
+                                        action: "JADWAL_DOWNLOAD".to_string(),
+                                        created_at_ms: now_ms,
+                                    });
+                                    next_cmd = Some(serde_json::json!({
+                                        "req_id": 8020,
+                                        "action": "JADWAL_DOWNLOAD",
+                                        "options": {
+                                            "nama_text_file": s.nama_text_file,
+                                            "video_folder_lg": s.video_folder_lg
+                                        }
+                                    }).to_string());
+                                }
+                            });
+
+                            if !log_msg.is_empty() { log(&log_msg); }
+                            if !status_msg.is_empty() { set_dom_html("lastStatus", &status_msg); }
+                            if let Some(cmd) = next_cmd { scapCallbackBridge(&cmd); }
+                        }
+                    },
+
+                    "JADWAL_DOWNLOAD_CALLBACK" => {
+                        // jadwal .txt berhasil didownload, sekarang copy ke fileJadwal
+                        let mut copy_cmd: Option<String> = None;
+
+                        CORE_STATE.with(|state| {
+                            let mut s = state.borrow_mut();
+                            s.downloading = 0;
+                            log("[Rust Core] jadwalDownload | Success");
+                            set_dom_html("backStatus", "Proses unduh file jadwal: Success");
+
+                            let now_ms = window().unwrap().performance().unwrap().now();
+                            s.pending_transactions.insert(8021, PendingTransaction {
+                                action: "COPY_JADWAL".to_string(),
+                                created_at_ms: now_ms,
+                            });
+                            copy_cmd = Some(serde_json::json!({
+                                "req_id": 8021,
+                                "action": "EXECUTE_COPY_FILE",
+                                "options": {
+                                    "source": format!("{}{}", s.video_folder_lg, s.nama_text_file),
+                                    "destination": format!("{}{}", s.video_folder_lg, s.file_jadwal)
+                                }
+                            }).to_string());
+                        });
+
+                        if let Some(cmd) = copy_cmd { scapCallbackBridge(&cmd); }
+                    },
+
+                    "REMOVE_ALL_CALLBACK" => {
+                        log("[Rust Core] clearStorage | Success. Rebooting...");
+                        set_dom_html("lastStatus", "Storage cleared. Rebooting...");
+                        scapCallbackBridge(&serde_json::json!({
+                            "req_id": 9999,
+                            "action": "EXECUTE_POWER_CMD",
+                            "options": { "powerCommand": "REBOOT" }
+                        }).to_string());
+                    },
+
+                    "CAPTURE_SCREEN_CALLBACK" => {
+                        if let Some(p) = evt.get("payload") {
+                            let capture_data = p.get("data").and_then(|d| d.as_str()).unwrap_or("");
+                            if capture_data.is_empty() {
+                                log("[Rust Core] captureScreen | No data returned");
+                                return;
+                            }
+
+                            log("[Rust Core] captureScreen | Success");
+                            set_dom_html("backStatus", "Sukses mengambil tampilan layar");
+
+                            let (kode_tv, tv_app_ver) = CORE_STATE.with(|state| {
+                                let s = state.borrow();
+                                (s.serial_number.clone(), s.device_app_version.clone())
+                            });
+
+                            scapCallbackBridge(&serde_json::json!({
+                                "req_id": 8041,
+                                "action": "SEND_CAPTURE",
+                                "options": {
+                                    "kode_tv": kode_tv,
+                                    "tv_app_ver": tv_app_ver,
+                                    "capture_data": capture_data
+                                }
+                            }).to_string());
+                        }
+                    },
+
+                    "WRITE_FILE_CALLBACK" => {
+                        log("[Rust Core] writeLog | Success");
+                    },
+
+                    "LIST_LOG_FILES_CALLBACK" => {
+                        if let Some(p) = evt.get("payload") {
+                            let files = p.get("files").and_then(|f| f.as_array());
+                            if files.is_none() { return; }
+                            let files = files.unwrap();
+
+                            let mut send_cmd: Option<String> = None;
+
+                            CORE_STATE.with(|state| {
+                                let mut s = state.borrow_mut();
+                                s.array_log.clear();
+
+                                for file in files {
+                                    let name = file.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                                    let prefix = format!("{}_", s.serial_number);
+                                    if name.contains(&prefix) {
+                                        s.array_log.push(name.to_string());
+                                    }
+                                }
+
+                                if s.array_log.is_empty() {
+                                    log("[Rust Core] checkLocalLogFiles | Tidak ada log yang perlu dikirim");
+                                    return;
+                                }
+
+                                log(&format!("[Rust Core] checkLocalLogFiles | Ada {} log belum dikirim", s.array_log.len()));
+                                set_dom_html("backStatus", "Menemukan log tayang di local");
+
+                                let first_log = s.array_log[0].clone();
+                                s.file_log = first_log.clone();
+
+                                let now_ms = window().unwrap().performance().unwrap().now();
+                                s.pending_transactions.insert(8051, PendingTransaction {
+                                    action: "KIRIM_LOG".to_string(),
+                                    created_at_ms: now_ms,
+                                });
+
+                                send_cmd = Some(serde_json::json!({
+                                    "req_id": 8051,
+                                    "action": "KIRIM_LOG",
+                                    "options": {
+                                        "file_log": first_log,
+                                        "video_folder_local": s.video_folder_local,
+                                        "kode_tv": s.serial_number
+                                    }
+                                }).to_string());
+                            });
+
+                            if let Some(cmd) = send_cmd { scapCallbackBridge(&cmd); }
+                        }
+                    },
+
+                    "KIRIM_LOG_CALLBACK" => {
+                        if let Some(p) = evt.get("payload") {
+                            let status = p.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
+                            let file_log = CORE_STATE.with(|state| state.borrow().file_log.clone());
+
+                            if status == 200 {
+                                log(&format!("[Rust Core] kirimLog | Success | {}", file_log));
+                                set_dom_html("backStatus", &format!("Kirim Log {} Sukses", file_log));
+
+                                // hapus file log setelah berhasil dikirim
+                                let delete_cmd = CORE_STATE.with(|state| {
+                                    let s = state.borrow();
+                                    serde_json::json!({
+                                        "req_id": 8052,
+                                        "action": "EXECUTE_REMOVE_FILE",
+                                        "options": {
+                                            "file": format!("{}{}", s.video_folder_lg, file_log)
+                                        }
+                                    }).to_string()
+                                });
+                                scapCallbackBridge(&delete_cmd);
+                            } else {
+                                log(&format!("[Rust Core] kirimLog | Failed | status: {}", status));
+                                set_dom_html("backStatus", &format!("Kirim Log {} Gagal", file_log));
+                            }
+                        }
+                    },
+
+                    "CHECK_IPK_VERSION_CALLBACK" => {
+                        if let Some(p) = evt.get("payload") {
+                            let status = p.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
+                            let response_text = p.get("response_text").and_then(|v| v.as_str()).unwrap_or("");
+
+                            if status != 200 || response_text.is_empty() {
+                                log("[Rust Core] checkIPKVersion | Server tidak menjawab");
+                                return;
+                            }
+
+                            let parsed: serde_json::Value = match serde_json::from_str(response_text) {
+                                Ok(v) => v,
+                                Err(_) => {
+                                    log("[Rust Core] checkIPKVersion | Invalid JSON");
+                                    return;
+                                }
+                            };
+
+                            let server_app_ver_path = parsed.get("appVerPath").and_then(|v| v.as_str()).unwrap_or("");
+                            let server_version_app = parsed.get("versionApp").and_then(|v| v.as_str()).unwrap_or("");
+                            let server_path_app = parsed.get("pathApp").and_then(|v| v.as_str()).unwrap_or("");
+                            let log_request = parsed.get("logRequest").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                            log(&format!("[Rust Core] checkIPKVersion | SERVER appVerPath: {}", server_app_ver_path));
+                            log(&format!("[Rust Core] checkIPKVersion | SERVER versionApp: {}", server_version_app));
+                            log(&format!("[Rust Core] checkIPKVersion | SERVER pathApp: {}", server_path_app));
+
+                            // update log_request dari server
+                            CORE_STATE.with(|state| {
+                                state.borrow_mut().log_request = log_request;
+                            });
+                            log(&format!("[Rust Core] Set log_request: {}", log_request));
+
+                            let mut needs_upgrade = false;
+                            let mut new_app_ver_path = String::new();
+                            let mut new_version_app = String::new();
+                            let mut new_path_app = String::new();
+
+                            CORE_STATE.with(|state| {
+                                let s = state.borrow();
+                                let cur_check_url = s.target_url_check_ipk.clone();
+                                let cur_version = s.target_device_app_version.clone();
+                                let cur_path = s.target_url_upgrade_ipk.clone();
+
+                                let app_ver_path_diff = !server_app_ver_path.is_empty() && cur_check_url != server_app_ver_path;
+                                let version_diff = !server_version_app.is_empty() && cur_version != server_version_app;
+                                let path_diff = !server_path_app.is_empty() && cur_path != server_path_app;
+
+                                if app_ver_path_diff {
+                                    log("[Rust Core] checkIPKVersion | URL appVerPath different");
+                                    new_app_ver_path = server_app_ver_path.to_string();
+                                } else if version_diff && path_diff {
+                                    log(&format!("[Rust Core] checkIPKVersion | New version found: {}", server_version_app));
+                                    new_version_app = server_version_app.to_string();
+                                    new_path_app = server_path_app.to_string();
+                                    needs_upgrade = true;
+                                } else {
+                                    log("[Rust Core] checkIPKVersion | AppVer is Latest");
+                                }
+                            });
+
+                            if !new_app_ver_path.is_empty() {
+                                CORE_STATE.with(|state| {
+                                    state.borrow_mut().target_url_check_ipk = new_app_ver_path;
+                                });
+                                // re-check dengan URL baru
+                                let url = CORE_STATE.with(|state| state.borrow().target_url_check_ipk.clone());
+                                scapCallbackBridge(&serde_json::json!({
+                                    "req_id": 8070,
+                                    "action": "CHECK_IPK_VERSION",
+                                    "options": { "url": url }
+                                }).to_string());
+                                return;
+                            }
+
+                            if needs_upgrade {
+                                CORE_STATE.with(|state| {
+                                    let mut s = state.borrow_mut();
+                                    s.target_device_app_version = new_version_app;
+                                    s.target_url_upgrade_ipk = new_path_app;
+                                    s.in_process_upgrade_ipk = 1;
+                                });
+                                // trigger getServerProperty → setServerProperty → upgradeIpkApplication
+                                scapCallbackBridge(&serde_json::json!({
+                                    "req_id": 8071,
+                                    "action": "FETCH_SERVER_PROPERTY"
+                                }).to_string());
+                            }
+                        }
+                    },
+
+                    "SERVER_PROPERTY_CALLBACK" => {
+                        if let Some(p) = evt.get("payload") {
+                            let req_id = evt.get("req_id").and_then(|r| r.as_u64()).unwrap_or(0);
+
+                            // hanya proses upgrade jika dipanggil dari checkIPKVersion
+                            if req_id != 8071 {
+                                CORE_STATE.with(|state| {
+                                    let mut s = state.borrow_mut();
+                                    s.server_config.server_ip = p.get("serverIp").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                    s.server_config.server_port = p.get("serverPort").and_then(|v| v.as_u64()).unwrap_or(80) as u32;
+                                    s.server_config.app_launch_mode = p.get("appLaunchMode").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                    s.server_config.fqdn_addr = p.get("fqdnAddr").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                });
+                                return;
+                            }
+
+                            // lanjut ke setServerProperty untuk upgrade
+                            let mut fqdn_mode = p.get("fqdnMode").and_then(|v| v.as_bool()).unwrap_or(true);
+                            let mut app_type = p.get("appType").and_then(|v| v.as_str()).unwrap_or("ipk").to_string();
+                            let mut launch_mode = p.get("appLaunchMode").and_then(|v| v.as_str()).unwrap_or("local").to_string();
+
+                            if app_type != "ipk" { app_type = String::from("ipk"); }
+                            if launch_mode != "local" { launch_mode = String::from("local"); }
+                            if !fqdn_mode { fqdn_mode = true; }
+
+                            CORE_STATE.with(|state| {
+                                let mut s = state.borrow_mut();
+                                s.app_fqdn_mode = fqdn_mode;
+                                s.app_type_var = app_type;
+                                s.app_launch_mode = launch_mode;
+                            });
+
+                            let (fqdn, app_type, launch, upgrade_url) = CORE_STATE.with(|state| {
+                                let s = state.borrow();
+                                (s.app_fqdn_mode, s.app_type_var.clone(), s.app_launch_mode.clone(), s.target_url_upgrade_ipk.clone())
+                            });
+
+                            if fqdn && app_type == "ipk" && launch == "local" {
+                                log("[Rust Core] setServerProperty | triggering upgrade");
+                                scapCallbackBridge(&serde_json::json!({
+                                    "req_id": 8072,
+                                    "action": "EXECUTE_SET_SERVER",
+                                    "options": {
+                                        "serverIp": "0.0.0.0",
+                                        "serverPort": 0,
+                                        "secureConnection": true,
+                                        "appLaunchMode": launch,
+                                        "fqdnMode": fqdn,
+                                        "fqdnAddr": upgrade_url,
+                                        "appType": app_type,
+                                        "autoSet": "off"
+                                    }
+                                }).to_string());
+                            }
+                        }
+                    },
+
+                    "SET_SERVER_CALLBACK" => {
+                        let req_id = evt.get("req_id").and_then(|r| r.as_u64()).unwrap_or(0);
+                        if req_id != 8072 { return; }
+
+                        let is_upgrading = CORE_STATE.with(|state| state.borrow().is_upgrading);
+                        if is_upgrading == 1 { return; }
+
+                        CORE_STATE.with(|state| {
+                            state.borrow_mut().is_upgrading = 1;
+                        });
+
+                        log("[Rust Core] setServerProperty | Success. Starting upgrade...");
+                        set_dom_html("lastStatus", "Upgrading Application...");
+
+                        scapCallbackBridge(&serde_json::json!({
+                            "req_id": 8073,
+                            "action": "EXECUTE_APP_UPGRADE",
+                            "options": {
+                                "type": "ipk",
+                                "to": "LOCAL",
+                                "recovery": false
+                            }
+                        }).to_string());
+                    },
+
+                    "APP_UPGRADE_CALLBACK" => {
+                        let req_id = evt.get("req_id").and_then(|r| r.as_u64()).unwrap_or(0);
+                        if req_id != 8073 { return; }
+
+                        CORE_STATE.with(|state| {
+                            state.borrow_mut().is_upgrading = 0;
+                        });
+
+                        log("[Rust Core] upgradeIpkApplication | Success. Rebooting...");
+                        set_dom_html("lastStatus", "Upgrade success. Rebooting...");
+
+                        let closure = Closure::wrap(Box::new(move || {
+                            scapCallbackBridge(&serde_json::json!({
+                                "req_id": 9999,
+                                "action": "EXECUTE_POWER_CMD",
+                                "options": { "powerCommand": "REBOOT" }
+                            }).to_string());
+                        }) as Box<dyn FnMut()>);
+                        window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(
+                            closure.as_ref().unchecked_ref(), 10000
+                        ).unwrap();
+                        closure.forget();
+                    },
+
                     _ => {
                         log(&format!("[Rust Core State] Action Complete Event -> {} transaction resolved cleanly.", event_type));
                     }
@@ -815,12 +1738,17 @@ pub fn process_hardware_event(json_str: &str) {
 #[wasm_bindgen]
 pub fn check_transaction_timeouts(current_time_ms: f64) {
     let timeout_threshold_ms = 8000.0;
+    let download_timeout_ms = 300000.0; // 5 menit untuk download
     let mut timed_out_ids: Vec<u64> = Vec::new();
 
     CORE_STATE.with(|state| {
         if let Ok(s) = state.try_borrow() {
             for (req_id, tx) in s.pending_transactions.iter() {
-                if (current_time_ms - tx.created_at_ms) > timeout_threshold_ms {
+                let threshold = match tx.action.as_str() {
+                    "CHUNK_DOWNLOAD" | "JADWAL_DOWNLOAD" | "COPY_JADWAL" => download_timeout_ms,
+                    _ => timeout_threshold_ms,
+                };
+                if (current_time_ms - tx.created_at_ms) > threshold {
                     timed_out_ids.push(*req_id);
                 }
             }
@@ -830,10 +1758,14 @@ pub fn check_transaction_timeouts(current_time_ms: f64) {
     if !timed_out_ids.is_empty() {
         CORE_STATE.with(|state| {
             if let Ok(mut s) = state.try_borrow_mut() {
-                s.hardware_fault_detected = true;
                 for id in timed_out_ids {
                     if let Some(tx) = s.pending_transactions.remove(&id) {
                         js_log(&format!("[WATCHDOG] Timeout on Transaction #{} ({})", id, tx.action));
+                        // hanya set fault untuk non-download transactions
+                        match tx.action.as_str() {
+                            "CHUNK_DOWNLOAD" | "JADWAL_DOWNLOAD" | "COPY_JADWAL" => {},
+                            _ => { s.hardware_fault_detected = true; }
+                        }
                     }
                 }
             }
@@ -844,4 +1776,85 @@ pub fn check_transaction_timeouts(current_time_ms: f64) {
 #[wasm_bindgen]
 pub fn get_core_state() -> String {
     CORE_STATE.with(|state| serde_json::to_string(&*state.borrow()).unwrap_or_else(|_| String::from("{}")))
+}
+
+#[wasm_bindgen]
+pub fn clear_storage() {
+    log("[Rust Core] clearStorage | Triggered");
+    set_dom_html("lastStatus", "Clearing storage...");
+
+    CORE_STATE.with(|state| {
+        let mut s = state.borrow_mut();
+        let now_ms = window().unwrap().performance().unwrap().now();
+        s.pending_transactions.insert(8099, PendingTransaction {
+            action: "CLEAR_STORAGE".to_string(),
+            created_at_ms: now_ms,
+        });
+    });
+
+    scapCallbackBridge(&serde_json::json!({
+        "req_id": 8099,
+        "action": "EXECUTE_REMOVE_ALL",
+        "options": { "device": "internal" }
+    }).to_string());
+}
+
+#[wasm_bindgen]
+pub fn write_log(video_name: &str) {
+    if video_name.is_empty() { return; }
+
+    let (kode_tv, video_folder_lg) = CORE_STATE.with(|state| {
+        let s = state.borrow();
+        (s.serial_number.clone(), s.video_folder_lg.clone())
+    });
+
+    if kode_tv.is_empty() { return; }
+
+    // format timestamp: yyyymmddHHMMSS
+    let now = js_sys::Date::new_0();
+    let year = now.get_full_year();
+    let month = now.get_month() + 1;
+    let day = now.get_date();
+    let hour = now.get_hours();
+    let minute = now.get_minutes();
+    let second = now.get_seconds();
+
+    let timestamp = format!(
+        "{}-{:02}-{:02} {:02}:{:02}:{:02} ",
+        year, month, day, hour, minute, second
+    );
+
+    // format sama dengan JS: yyyymmdd
+    let file_log = format!(
+        "{}_{}{}{}{}.txt",
+        kode_tv,
+        format!("{:04}", year),
+        format!("{:02}", month),
+        format!("{:02}", day),
+        format!("{:02}", hour)
+    );
+
+    let data_log = format!("{}{}\n", timestamp, video_name);
+    let text_path = format!("{}{}", video_folder_lg, file_log);
+
+    CORE_STATE.with(|state| {
+        let mut s = state.borrow_mut();
+        let now_ms = window().unwrap().performance().unwrap().now();
+        s.pending_transactions.insert(8060, PendingTransaction {
+            action: "WRITE_LOG".to_string(),
+            created_at_ms: now_ms,
+        });
+    });
+
+    scapCallbackBridge(&serde_json::json!({
+        "req_id": 8060,
+        "action": "EXECUTE_WRITE_FILE",
+        "options": {
+            "data": data_log,
+            "path": text_path,
+            "mode": "append",
+            "length": data_log.len(),
+            "encoding": "utf8"
+        }
+    }).to_string());
 }

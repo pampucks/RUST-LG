@@ -159,6 +159,35 @@ function scapCallbackBridge(jsonRequestString) {
         }
         break;
 
+      case "EXECUTE_REMOVE_FILE":
+        if (safeStorage && isRealLGTV) {
+          new Storage().removeFile(
+            function () {
+              dispatchSuccess("REMOVE_FILE_CALLBACK");
+            },
+            dispatchFailure,
+            request.options
+          );
+        } else {
+          dispatchSuccess("REMOVE_FILE_CALLBACK");
+        }
+        break;
+
+      case "EXECUTE_LIST_FILES":
+        if (safeStorage && isRealLGTV) {
+          new Storage().listFiles(
+            function (cb) {
+              dispatchSuccess("LIST_FILES_CALLBACK", cb);
+            },
+            dispatchFailure,
+            request.options
+          );
+        } else {
+          // simulator: return empty array, semua file dianggap missing
+          dispatchSuccess("LIST_FILES_CALLBACK", { files: [] });
+        }
+        break;
+
       case "EXECUTE_WRITE_FILE":
         if (safeStorage && isRealLGTV) {
           new Storage().writeFile(
@@ -257,6 +286,328 @@ function scapCallbackBridge(jsonRequestString) {
         break;
       }
 
+      case "UPDATE_CONTENT": {
+        var opts = request.options;
+        var xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function () {
+          if (xhr.readyState == 4) {
+            setTimeout(function () {
+              window.rust_process_hardware_event(
+                JSON.stringify({
+                  req_id: request.req_id,
+                  event_type: "UPDATE_CONTENT_CALLBACK",
+                  hardware_status: "SUCCESS",
+                  payload: {
+                    status: xhr.status,
+                    response_text: xhr.responseText || "",
+                  },
+                })
+              );
+            }, 0);
+          }
+        };
+        xhr.open("POST", "http://dl.idm.digimaxsignage.com/tvapp", true);
+        xhr.setRequestHeader(
+          "Content-type",
+          "application/x-www-form-urlencoded"
+        );
+        xhr.send(
+          "duid=" +
+            opts.kode_tv +
+            "&checkdata=1&getdata=0&appver=" +
+            opts.kode_tv
+        );
+        break;
+      }
+
+      case "JADWAL_DOWNLOAD": {
+        var jOpts = request.options;
+        var jSource =
+          "http://dl.idm.digimaxsignage.com/app/video/" + jOpts.nama_text_file;
+        var jDest = jOpts.video_folder_lg + jOpts.nama_text_file;
+        if (safeStorage && isRealLGTV) {
+          new Storage().copyFile(
+            function () {
+              setTimeout(function () {
+                window.rust_process_hardware_event(
+                  JSON.stringify({
+                    req_id: request.req_id,
+                    event_type: "JADWAL_DOWNLOAD_CALLBACK",
+                    hardware_status: "SUCCESS",
+                    payload: {},
+                  })
+                );
+              }, 0);
+            },
+            dispatchFailure,
+            { source: jSource, destination: jDest }
+          );
+        } else {
+          // simulator: langsung success
+          setTimeout(function () {
+            window.rust_process_hardware_event(
+              JSON.stringify({
+                req_id: request.req_id,
+                event_type: "JADWAL_DOWNLOAD_CALLBACK",
+                hardware_status: "SUCCESS",
+                payload: {},
+              })
+            );
+          }, 500);
+        }
+        break;
+      }
+
+      case "UPDATE_DOWNLOAD": {
+        var udOpts = request.options;
+        var udXhr = new XMLHttpRequest();
+        udXhr.open(
+          "POST",
+          "http://ul.idm.digimaxsignage.com/update-content-done",
+          true
+        );
+        udXhr.setRequestHeader(
+          "Content-type",
+          "application/x-www-form-urlencoded"
+        );
+        udXhr.send("duid=" + udOpts.kode_tv + "&zipname=" + udOpts.nama_sesi);
+        console.log("[Adapter] UPDATE_DOWNLOAD sent for", udOpts.nama_sesi);
+        break;
+      }
+
+      case "EXECUTE_REMOVE_ALL": {
+        if (safeStorage && isRealLGTV) {
+          new Storage().removeAll(
+            function () {
+              setTimeout(function () {
+                window.rust_process_hardware_event(
+                  JSON.stringify({
+                    req_id: request.req_id,
+                    event_type: "REMOVE_ALL_CALLBACK",
+                    hardware_status: "SUCCESS",
+                    payload: {},
+                  })
+                );
+              }, 0);
+            },
+            dispatchFailure,
+            { device: "internal" }
+          );
+        } else {
+          console.log("[Adapter] Simulator: removeAll skipped");
+          setTimeout(function () {
+            window.rust_process_hardware_event(
+              JSON.stringify({
+                req_id: request.req_id,
+                event_type: "REMOVE_ALL_CALLBACK",
+                hardware_status: "SUCCESS",
+                payload: {},
+              })
+            );
+          }, 500);
+        }
+        break;
+      }
+
+      case "EXECUTE_POWER_CMD": {
+        var powerOpts = request.options;
+        if (safePower && isRealLGTV) {
+          var powerCommand =
+            powerOpts.powerCommand === "REBOOT"
+              ? Power.PowerCommand.REBOOT
+              : Power.PowerCommand.REBOOT;
+          new Power().executePowerCommand(
+            function () {
+              console.log("[Adapter] Power command success");
+            },
+            function () {
+              console.log("[Adapter] Power command failed");
+            },
+            { powerCommand: powerCommand }
+          );
+        } else {
+          console.log(
+            "[Adapter] Simulator: power command skipped:",
+            powerOpts.powerCommand
+          );
+        }
+        break;
+      }
+
+      case "EXECUTE_SCREEN_CAPTURE": {
+        var capOpts = request.options;
+        if (safeSignage && isRealLGTV) {
+          var captureOptions = {
+            save: capOpts.save,
+            thumbnail: capOpts.thumbnail,
+          };
+          if (capOpts.imgResolution === "HD" && Signage.ImgResolution) {
+            captureOptions.imgResolution = Signage.ImgResolution.HD;
+          }
+          new Signage().captureScreen(
+            function (csObj) {
+              setTimeout(function () {
+                window.rust_process_hardware_event(
+                  JSON.stringify({
+                    req_id: request.req_id,
+                    event_type: "CAPTURE_SCREEN_CALLBACK",
+                    hardware_status: "SUCCESS",
+                    payload: { data: csObj.data },
+                  })
+                );
+              }, 0);
+            },
+            dispatchFailure,
+            captureOptions
+          );
+        } else {
+          console.log("[Adapter] Simulator: captureScreen skipped");
+          // simulator tidak kirim callback, tidak ada data
+        }
+        break;
+      }
+
+      case "SEND_CAPTURE": {
+        var scOpts = request.options;
+        var scXhr = new XMLHttpRequest();
+        scXhr.onreadystatechange = function () {
+          if (scXhr.readyState == 4) {
+            if (scXhr.status == 200) {
+              console.log("[Adapter] sendCapture | Success");
+            } else {
+              console.log(
+                "[Adapter] sendCapture | Failed | status:",
+                scXhr.status
+              );
+            }
+          }
+        };
+        scXhr.open(
+          "POST",
+          "http://ul.idm.digimaxsignage.com/upload-screen",
+          true
+        );
+        scXhr.setRequestHeader(
+          "Content-type",
+          "application/x-www-form-urlencoded"
+        );
+        scXhr.send(
+          "duid=" +
+            scOpts.kode_tv +
+            "&screenimg=" +
+            scOpts.capture_data +
+            "&appver=" +
+            scOpts.tv_app_ver
+        );
+        break;
+      }
+
+      case "KIRIM_LOG": {
+        var klOpts = request.options;
+        var logUrl = klOpts.video_folder_local + klOpts.file_log;
+        var klXhr = new XMLHttpRequest();
+        klXhr.open("GET", logUrl, true);
+        klXhr.onreadystatechange = function () {
+          if (klXhr.readyState == 4) {
+            var sendLog = new XMLHttpRequest();
+            sendLog.onreadystatechange = function () {
+              if (sendLog.readyState == 4) {
+                setTimeout(function () {
+                  window.rust_process_hardware_event(
+                    JSON.stringify({
+                      req_id: request.req_id,
+                      event_type: "KIRIM_LOG_CALLBACK",
+                      hardware_status: "SUCCESS",
+                      payload: { status: sendLog.status },
+                    })
+                  );
+                }, 0);
+              }
+            };
+            sendLog.open(
+              "POST",
+              "http://ul.idm.digimaxsignage.com/send-file-log",
+              true
+            );
+            sendLog.setRequestHeader(
+              "Content-type",
+              "application/x-www-form-urlencoded"
+            );
+            sendLog.send(
+              "file=" + klOpts.file_log + "&log=" + klXhr.responseText
+            );
+          }
+        };
+        klXhr.send();
+        break;
+      }
+
+      case "CHECK_IPK_VERSION": {
+        var ipkOpts = request.options;
+        var ipkUrl = ipkOpts.url;
+        var ipkXhr = new XMLHttpRequest();
+        var ipkTimeout = setTimeout(function () {
+          ipkXhr.abort();
+          console.log("[Adapter] checkIPKVersion timed out");
+        }, 15000);
+        ipkXhr.onreadystatechange = function () {
+          if (ipkXhr.readyState == 4) {
+            clearTimeout(ipkTimeout);
+            setTimeout(function () {
+              window.rust_process_hardware_event(
+                JSON.stringify({
+                  req_id: request.req_id,
+                  event_type: "CHECK_IPK_VERSION_CALLBACK",
+                  hardware_status: "SUCCESS",
+                  payload: {
+                    status: ipkXhr.status,
+                    response_text: ipkXhr.responseText || "",
+                  },
+                })
+              );
+            }, 0);
+          }
+        };
+        ipkXhr.open("GET", ipkUrl, true);
+        ipkXhr.setRequestHeader("Cache-Control", "no-cache");
+        ipkXhr.setRequestHeader("Pragma", "no-cache");
+        ipkXhr.send();
+        break;
+      }
+
+      case "EXECUTE_SET_SERVER": {
+        var ssOpts = request.options;
+        if (typeof Configuration !== "undefined" && isRealLGTV) {
+          var config = new Configuration();
+          config.setServerProperty(
+            function () {
+              setTimeout(function () {
+                window.rust_process_hardware_event(
+                  JSON.stringify({
+                    req_id: request.req_id,
+                    event_type: "SET_SERVER_CALLBACK",
+                    hardware_status: "SUCCESS",
+                    payload: {},
+                  })
+                );
+              }, 0);
+            },
+            dispatchFailure,
+            ssOpts
+          );
+        } else {
+          console.log("[Adapter] Simulator: setServerProperty skipped");
+        }
+        break;
+      }
+
+      case "UPDATE_STATUS":
+        console.log(
+          "[Adapter] BG tick received (not yet implemented):",
+          request.action
+        );
+        break;
+
       default:
         console.warn(
           "[JS Sandbox] No execution mapping found for: ",
@@ -318,12 +669,18 @@ window.triggerNetworkRetryDelay = function (delayMs) {
       );
     });
     el.addEventListener("play", function () {
-      // Hide the other player (opacity-based dual buffer)
       var otherId = id === "videoPlayerA" ? "videoPlayerB" : "videoPlayerA";
       var other = document.getElementById(otherId);
       if (other) {
         other.style.opacity = 0;
         other.muted = true;
+      }
+      // tulis log tayang
+      var src = el.src || "";
+      var match = src.match(/([^\/]+\.mp4)$/);
+      var videoName = match ? match[1] : "";
+      if (videoName && typeof window.rust_write_log === "function") {
+        window.rust_write_log(videoName);
       }
     });
   }

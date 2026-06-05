@@ -23,6 +23,15 @@
         evaluate_hardware_routing,
         check_transaction_timeouts,
         get_core_state,
+        clear_storage,
+        write_log,
+        tick_check_playlist,
+        tick_check_connection,
+        tick_check_content,
+        tick_update_status,
+        tick_sync_capture,
+        tick_send_log,
+        tick_check_version,
       } from "./pkg/rust_lg_adapter.js";
 
       import { wasmBase64 } from "./pkg/wasm_bytes.js";
@@ -50,6 +59,15 @@
           window.rust_evaluate_hardware_routing = evaluate_hardware_routing;
           window.rust_check_transaction_timeouts = check_transaction_timeouts;
           window.rust_get_core_state = get_core_state;
+          window.rust_tick_check_playlist = tick_check_playlist;
+          window.rust_tick_check_connection = tick_check_connection;
+          window.rust_tick_check_content = tick_check_content;
+          window.rust_tick_update_status = tick_update_status;
+          window.rust_tick_sync_capture = tick_sync_capture;
+          window.rust_tick_send_log = tick_send_log;
+          window.rust_tick_check_version = tick_check_version;
+          window.rust_clear_storage = clear_storage;
+          window.rust_write_log = write_log;
 
           let webosFirmwareVersion = 6; // Baseline clean firmware fallback detection variable
           try {

@@ -43,7 +43,7 @@ pub struct AppConfig {
 
 pub const CONFIG: AppConfig = AppConfig {
     dev_mode: DevMode::Prod,
-    play_mode: PlayMode::Single,
+    play_mode: PlayMode::Dual,
     device_app_version: "20250904",
     os_type: "webos",
     
