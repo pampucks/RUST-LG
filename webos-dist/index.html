@@ -8,6 +8,11 @@
     <script src="SCAP_Library-official-1.8.2-20260127/js/webOS.js"></script>
     <script src="SCAP_Library-official-1.8.2-20260127/js/cordova/2.7.0/cordova.webos.js"></script>
     <script src="SCAP_Library-official-1.8.2-20260127/js/custom.js"></script>
+    <script src="SCAP_Library-official-1.8.2-20260127/js/cordova-cd/deviceInfo.js"></script>
+    <script src="SCAP_Library-official-1.8.2-20260127/js/cordova-cd/configuration.js"></script>
+    <script src="SCAP_Library-official-1.8.2-20260127/js/cordova-cd/storage.js"></script>
+    <script src="SCAP_Library-official-1.8.2-20260127/js/cordova-cd/signage.js"></script>
+    <script src="SCAP_Library-official-1.8.2-20260127/js/cordova-cd/power.js"></script>
     <script src="SCAP_Library-official-1.8.2-20260127/js/jquery-3.5.1.min.js"></script>
     <script src="SCAP_Library-official-1.8.2-20260127/js/qrcode.min.js"></script>
 
@@ -22,7 +27,7 @@
 
       import { wasmBase64 } from "./pkg/wasm_bytes.js";
 
-      // 🔥 CRITICAL FIX: Bind the missing global 'log' symbol that Rust is expecting
+      // Bind the missing global 'log' symbol that Rust is expecting
       window.log = console.log.bind(console);
 
       function base64ToUint8Array(b64) {
@@ -34,18 +39,19 @@
         return bytes;
       }
 
-      const wasmBytes = base64ToUint8Array(wasmBase64);
+      function bootWasm() {
+        const wasmBytes = base64ToUint8Array(wasmBase64);
 
-      // ✨ DEPRECATION FIX: Pass the bytes wrapped cleanly inside a module object configuration
-      init({ module_or_path: wasmBytes })
-        .then(() => {
+        // Pass the bytes wrapped inside the modern configuration layout
+        init({ module_or_path: wasmBytes }).then(() => {
+          // Standard binding mappings
           window.rust_process_signage_command = process_signage_command;
           window.rust_process_hardware_event = process_hardware_event;
           window.rust_evaluate_hardware_routing = evaluate_hardware_routing;
           window.rust_check_transaction_timeouts = check_transaction_timeouts;
           window.rust_get_core_state = get_core_state;
 
-          let webosFirmwareVersion = 4;
+          let webosFirmwareVersion = 6; // Baseline clean firmware fallback detection variable
           try {
             if (
               window.webOS &&
@@ -62,20 +68,77 @@
             );
           }
 
+          // 🚀 UNIFIED ENTRYPOINT HANDOFF: Kick off the system loop directly via Rust!
+          console.log(
+            "[Boot] WASM ready. Firing evaluate_hardware_routing with version:",
+            webosFirmwareVersion
+          );
+
+          // 💡 Inject the global safety wrapper here:
+          if (typeof window.rust_process_hardware_event === "function") {
+            const nativeRustHandler = window.rust_process_hardware_event;
+            window.rust_process_hardware_event = function (jsonResponseString) {
+              setTimeout(function () {
+                nativeRustHandler(jsonResponseString);
+              }, 0);
+            };
+          }
+
           window.rust_evaluate_hardware_routing(webosFirmwareVersion);
+
+          // Clear the gatekeeper screens layout layers gracefully // TODO
+          // if (typeof window.hideGatekeeper === "function") {
+          //   window.hideGatekeeper();
+          // }
 
           setInterval(() => {
             window.rust_check_transaction_timeouts(Date.now());
           }, 1000);
-        })
-        .catch((err) => {
-          console.error(
-            "Failed to cleanly assign or parse WebAssembly Engine context:",
-            err
-          );
-          document.getElementById("processStats").innerHTML =
-            "Core Engine Crash - Verification Failure";
         });
+      }
+
+      // ✅ Wait for cordova to finish before booting WASM
+      // Falls back immediately if cordova never fires (pure browser)
+      var cordovaReady = false;
+      document.addEventListener(
+        "deviceready",
+        function () {
+          // Add this BEFORE bootWasm() is called, inside the setTimeout fallback or deviceready
+          const _original = window.scapCallbackBridge;
+          window.scapCallbackBridge = function (str) {
+            console.log(
+              "[INTERCEPT] Rust called scapCallbackBridge with:",
+              str
+            );
+            return _original(str);
+          };
+
+          console.log("[Boot] Cordova deviceready fired.");
+          cordovaReady = true;
+          bootWasm();
+        },
+        false
+      );
+
+      // Fallback: if deviceready doesn't fire within 3s, boot anyway
+      setTimeout(function () {
+        if (!cordovaReady) {
+          // Add this BEFORE bootWasm() is called, inside the setTimeout fallback or deviceready
+          const _original = window.scapCallbackBridge;
+          window.scapCallbackBridge = function (str) {
+            console.log(
+              "[INTERCEPT] Rust called scapCallbackBridge with:",
+              str
+            );
+            return _original(str);
+          };
+
+          console.warn(
+            "[Boot] Cordova deviceready timeout — booting in simulation mode."
+          );
+          bootWasm();
+        }
+      }, 3000);
     </script>
   </head>
   <body>
@@ -223,14 +286,22 @@
           title.innerHTML = "Hardware Unsupported";
           title.style.color = "#ff4444";
           msg.innerHTML =
-            "This application requires WebAssembly (webOS 6.0+). This panel runs a legacy version of webOS (webOS 4) and cannot execute this app.";
+            "This application requires WebAssembly support. This panel runs a legacy platform web engine and cannot execute this application core layer.";
           throw new Error("Application halted: WebAssembly missing.");
         }
 
+        // ✨ UPDATED: This function now clears BOTH screens out of the way simultaneously
         window.hideGatekeeper = function () {
           if (gatekeeper) {
             gatekeeper.style.display = "none";
           }
+          var bootScreen = document.getElementById("bootScreen");
+          if (bootScreen) {
+            bootScreen.style.display = "none";
+          }
+          console.log(
+            "🚀 [UI System] Splash elements cleared. Signage interface rendering active."
+          );
         };
       })();
     </script>
