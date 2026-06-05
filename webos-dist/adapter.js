@@ -601,6 +601,107 @@ function scapCallbackBridge(jsonRequestString) {
         break;
       }
 
+      case "UDP_START": {
+        var udpPort = request.options.port || 9991;
+
+        if (typeof webOS === "undefined" || !webOS.service) {
+          console.log(
+            "[Adapter] UDP_START: webOS.service not available (simulator), skipping"
+          );
+          // Di simulator, langsung jadi master tanpa election
+          setTimeout(function () {
+            window.rust_process_hardware_event(
+              JSON.stringify({
+                req_id: request.req_id,
+                event_type: "UDP_START_CALLBACK",
+                hardware_status: "SUCCESS",
+                payload: { port: udpPort, simulated: true },
+              })
+            );
+          }, 0);
+          break;
+        }
+
+        webOS.service.request("luna://com.lg.app.signage.dev.webosservice/", {
+          method: "startUDPService",
+          parameters: { port: udpPort },
+          onSuccess: function (res) {
+            console.log("[Adapter] UDP_START onSuccess:", JSON.stringify(res));
+            setTimeout(function () {
+              window.rust_process_hardware_event(
+                JSON.stringify({
+                  req_id: request.req_id,
+                  event_type: "UDP_START_CALLBACK",
+                  hardware_status: "SUCCESS",
+                  payload: res,
+                })
+              );
+            }, 0);
+          },
+          onFailure: function (err) {
+            console.error("[Adapter] UDP_START failed:", JSON.stringify(err));
+            // jangan dispatchFailure, biarkan timeout watchdog handle
+          },
+        });
+        break;
+      }
+
+      case "UDP_BROADCAST": {
+        webOS.service.request("luna://com.lg.app.signage.dev.webosservice/", {
+          method: "broadcastUDP",
+          parameters: {
+            data: request.options.data,
+            port: request.options.port,
+          },
+          onSuccess: function () {
+            setTimeout(function () {
+              window.rust_process_hardware_event(
+                JSON.stringify({
+                  req_id: request.req_id,
+                  event_type: "UDP_BROADCAST_CALLBACK",
+                  hardware_status: "SUCCESS",
+                  payload: {},
+                })
+              );
+            }, 0);
+          },
+          onFailure: function (err) {
+            console.error("[Adapter] UDP_BROADCAST failed:", err);
+          },
+        });
+        break;
+      }
+
+      case "UDP_SUBSCRIBE": {
+        webOS.service.request("luna://com.lg.app.signage.dev.webosservice/", {
+          method: "subscribeUDP",
+          parameters: { subscribe: true },
+          onSuccess: function (res) {
+            if (res.data) {
+              // ada pesan masuk
+              setTimeout(function () {
+                window.rust_process_hardware_event(
+                  JSON.stringify({
+                    req_id: request.req_id,
+                    event_type: "UDP_MESSAGE_RECEIVED",
+                    hardware_status: "SUCCESS",
+                    payload: {
+                      data: res.data,
+                      from_ip: res.from_ip,
+                    },
+                  })
+                );
+              }, 0);
+            }
+          },
+          onFailure: function (err) {
+            console.error("[Adapter] UDP_SUBSCRIBE failed:", err);
+          },
+          subscribe: true,
+        });
+        break;
+      }
+
       case "UPDATE_STATUS":
         console.log(
           "[Adapter] BG tick received (not yet implemented):",
@@ -667,6 +768,10 @@ window.triggerNetworkRetryDelay = function (delayMs) {
           payload: {},
         })
       );
+      // master kirim sync ke slaves
+      if (typeof window.rust_send_sync_to_slaves === "function") {
+        window.rust_send_sync_to_slaves();
+      }
     });
     el.addEventListener("play", function () {
       var otherId = id === "videoPlayerA" ? "videoPlayerB" : "videoPlayerA";

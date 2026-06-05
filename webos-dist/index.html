@@ -32,6 +32,9 @@
         tick_sync_capture,
         tick_send_log,
         tick_check_version,
+        start_udp_election,
+        on_udp_receive,
+        send_sync_to_slaves,
       } from "./pkg/rust_lg_adapter.js";
 
       import { wasmBase64 } from "./pkg/wasm_bytes.js";
@@ -68,6 +71,9 @@
           window.rust_tick_check_version = tick_check_version;
           window.rust_clear_storage = clear_storage;
           window.rust_write_log = write_log;
+          window.rust_start_udp_election = start_udp_election;
+          window.rust_on_udp_receive = on_udp_receive;
+          window.rust_send_sync_to_slaves = send_sync_to_slaves;
 
           let webosFirmwareVersion = 6; // Baseline clean firmware fallback detection variable
           try {

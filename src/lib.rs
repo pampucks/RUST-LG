@@ -122,6 +122,18 @@ pub struct CoreState {
     pub app_fqdn_mode: bool,
     pub model_name_split: String,
 
+    // UDP Master Election
+    pub udp_port: u16,
+    pub election_done: bool,
+    pub election_start_ms: f64,
+    pub is_socket_connected: u8,
+    pub is_socket_server_running: u8,
+
+    // Sync payload dari master
+    pub sync_playlist_id: usize,
+    pub sync_content_id: usize,
+    pub sync_player_id: String,
+
     // Playlist state
     pub playlist_entries: Vec<PlaylistEntry>,
     pub active_playlist_id: usize,
@@ -189,6 +201,14 @@ thread_local! {
         app_launch_mode: String::from("local"),
         app_fqdn_mode: true,
         model_name_split: String::new(),
+        udp_port: 9991,
+        election_done: false,
+        election_start_ms: 0.0,
+        is_socket_connected: 0,
+        is_socket_server_running: 0,
+        sync_playlist_id: 0,
+        sync_content_id: 0,
+        sync_player_id: String::from("A"),
         playlist_entries: Vec::new(),
         active_playlist_id: 0,
         active_content_id: 0,
@@ -627,18 +647,9 @@ pub fn process_signage_command(json_str: &str) {
 }
 
 // --- PRIVATE IN-ENGINE HELPER SUBROUTINES ---
-fn execute_find_master(s: &mut CoreState) -> String {
-    if s.play_mode != "single" {
-        log(&format!("[Rust Core] findMaster | masterIP: {}", s.master_ip));
-        if s.my_ip != s.master_ip {
-            s.is_master = 0;
-            log("[Rust Core] Panel state assigned: SLAVE NODE.");
-        } else {
-            s.is_master = 1;
-            log("[Rust Core] Panel state assigned: MASTER NODE. Booting socket servers.");
-        }
-    }
-
+fn check_playlist_after_network(s: &mut CoreState) -> String {
+    // Master election sekarang handled oleh UDP
+    // Fungsi ini hanya bertanggung jawab untuk check jadwal
     s.jadwal_dicek = s.file_jadwal.clone();
     set_dom_html("lastStatus", "Memeriksa jadwal tayang");
     log(&format!("[Rust Core] getPlaylistOffline | checking: {}", s.jadwal_dicek));
@@ -1003,13 +1014,13 @@ pub fn process_hardware_event(json_str: &str) {
                                 ip_output = s.my_ip.clone();
 
                                 if connection_acquired {
-                                    find_master_cmd = Some(execute_find_master(&mut s));
+                                    find_master_cmd = Some(check_playlist_after_network(&mut s));
                                 } else {
                                     if s.coba_jaringan < 3 {
                                         s.coba_jaringan += 1;
                                         run_retry_timeout = true;
                                     } else {
-                                        find_master_cmd = Some(execute_find_master(&mut s));
+                                        find_master_cmd = Some(check_playlist_after_network(&mut s));
                                     }
                                 }
                             }); // Lock drops
@@ -1017,6 +1028,14 @@ pub fn process_hardware_event(json_str: &str) {
                             if let Some(cmd) = find_master_cmd {
                                 scapCallbackBridge(&cmd);
                                 start_background_services();
+
+                                 // start UDP election hanya untuk dual mode
+                                let is_dual = CORE_STATE.with(|state| {
+                                    state.borrow().play_mode == "dual"
+                                });
+                                if is_dual {
+                                    start_udp_election();
+                                }
                             } else if req_id == 8030 {
                                 // periodic connection check — update UI saja
                                 log("[Rust BG] tick_check_connection | network status updated");
@@ -1726,6 +1745,78 @@ pub fn process_hardware_event(json_str: &str) {
                         closure.forget();
                     },
 
+                    "UDP_START_CALLBACK" => {
+                        // UDP service sudah listen, sekarang broadcast IP kita
+                        let (my_ip, udp_port) = CORE_STATE.with(|state| {
+                            let s = state.borrow();
+                            (s.my_ip.clone(), s.udp_port)
+                        });
+
+                        let payload = serde_json::json!({
+                            "type": "ELECTION",
+                            "ip": my_ip
+                        }).to_string();
+
+                        log(&format!("[UDP] Service ready. Broadcasting election: {}", my_ip));
+
+                        scapCallbackBridge(&serde_json::json!({
+                            "req_id": 9101,
+                            "action": "UDP_BROADCAST",
+                            "options": {
+                                "data": payload,
+                                "port": udp_port
+                            }
+                        }).to_string());
+
+                        // subscribe untuk terima broadcast dari device lain
+                        scapCallbackBridge(&serde_json::json!({
+                            "req_id": 9102,
+                            "action": "UDP_SUBSCRIBE",
+                            "options": {}
+                        }).to_string());
+
+                        // set timeout — kalau tidak ada yang balas dalam 2 detik, jadi master
+                        let closure = Closure::wrap(Box::new(move || {
+                            let already_done = CORE_STATE.with(|state| state.borrow().election_done);
+                            if !already_done {
+                                log("[UDP] No response in 2s → becoming MASTER");
+                                CORE_STATE.with(|state| {
+                                    let mut s = state.borrow_mut();
+                                    s.master_ip = s.my_ip.clone();
+                                    s.is_master = 1;
+                                    s.election_done = true;
+                                });
+
+                                let my_ip = CORE_STATE.with(|s| s.borrow().my_ip.clone());
+                                set_dom_html("internetStatus", &format!("{} | MASTER", my_ip));
+                                set_dom_html("socketStatusServerDIV", "UDP Master Active");
+                            }
+                        }) as Box<dyn FnMut()>);
+
+                        window().unwrap().set_timeout_with_callback_and_timeout_and_arguments_0(
+                            closure.as_ref().unchecked_ref(), 2000
+                        ).unwrap();
+                        closure.forget();
+                    },
+
+                    "UDP_BROADCAST_CALLBACK" => {
+                        log("[UDP] Broadcast sent OK");
+                    },
+
+                    "UDP_MESSAGE_RECEIVED" => {
+                        if let Some(p) = evt.get("payload") {
+                            let data = p.get("data").and_then(|d| d.as_str()).unwrap_or("");
+                            let from_ip = p.get("from_ip").and_then(|i| i.as_str()).unwrap_or("");
+                            let my_ip = CORE_STATE.with(|s| s.borrow().my_ip.clone());
+
+                            // abaikan pesan dari diri sendiri
+                            if from_ip == my_ip { return; }
+
+                            log(&format!("[UDP] Message from {}: {}", from_ip, data));
+                            on_udp_receive(data);
+                        }
+                    },
+
                     _ => {
                         log(&format!("[Rust Core State] Action Complete Event -> {} transaction resolved cleanly.", event_type));
                     }
@@ -1855,6 +1946,165 @@ pub fn write_log(video_name: &str) {
             "mode": "append",
             "length": data_log.len(),
             "encoding": "utf8"
+        }
+    }).to_string());
+}
+
+// ─── UDP MASTER ELECTION ──────────────────────────────────────────
+
+#[wasm_bindgen]
+pub fn start_udp_election() {
+    let already_done = CORE_STATE.with(|state| state.borrow().election_done);
+    if already_done { return; }
+
+    let (my_ip, udp_port) = CORE_STATE.with(|state| {
+        let s = state.borrow();
+        (s.my_ip.clone(), s.udp_port)
+    });
+
+    if my_ip == "0.0.0.0" {
+        log("[UDP] start_udp_election: no IP yet, skip");
+        return;
+    }
+
+    log(&format!("[UDP] Starting election | my_ip: {} port: {}", my_ip, udp_port));
+
+    // record waktu election dimulai
+    let now_ms = window().unwrap().performance().unwrap().now();
+    CORE_STATE.with(|state| {
+        state.borrow_mut().election_start_ms = now_ms;
+    });
+
+    // Step 1: start UDP service di Luna
+    scapCallbackBridge(&serde_json::json!({
+        "req_id": 9100,
+        "action": "UDP_START",
+        "options": { "port": udp_port }
+    }).to_string());
+}
+
+#[wasm_bindgen]
+pub fn on_udp_receive(json_str: &str) {
+    // dipanggil dari JS ketika ada pesan UDP masuk
+    if let Ok(msg) = serde_json::from_str::<serde_json::Value>(json_str) {
+        let msg_type = msg.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+        match msg_type {
+            "ELECTION" => {
+                let from_ip = msg.get("ip").and_then(|i| i.as_str()).unwrap_or("");
+                if from_ip.is_empty() { return; }
+
+                let already_done = CORE_STATE.with(|state| state.borrow().election_done);
+
+                if !already_done {
+                    // dapat broadcast dari device lain duluan → jadi slave
+                    log(&format!("[UDP] Election received from {} → becoming SLAVE", from_ip));
+
+                    CORE_STATE.with(|state| {
+                        let mut s = state.borrow_mut();
+                        s.master_ip = from_ip.to_string();
+                        s.is_master = 0;
+                        s.election_done = true;
+                    });
+
+                    set_dom_html("internetStatus", &format!(
+                        "{} | SLAVE → {}", 
+                        CORE_STATE.with(|s| s.borrow().my_ip.clone()),
+                        from_ip
+                    ));
+
+                    // subscribe untuk terima sync dari master
+                    scapCallbackBridge(&serde_json::json!({
+                        "req_id": 9103,
+                        "action": "UDP_SUBSCRIBE",
+                        "options": {}
+                    }).to_string());
+                }
+            },
+
+            "SYNC" => {
+                // terima sync content dari master
+                let playlist_id = msg.get("playlist_id").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let content_id = msg.get("content_id").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let player_id = msg.get("player_id").and_then(|v| v.as_str()).unwrap_or("A");
+
+                let mut play_cmd: Option<String> = None;
+
+                CORE_STATE.with(|state| {
+                    let mut s = state.borrow_mut();
+                    s.is_socket_connected = 1;
+
+                    // hanya update kalau berbeda dari yang sedang running
+                    if s.sync_content_id == content_id && s.sync_playlist_id == playlist_id {
+                        return;
+                    }
+
+                    s.sync_playlist_id = playlist_id;
+                    s.sync_content_id = content_id;
+                    s.sync_player_id = player_id.to_string();
+
+                    if s.playlist_entries.is_empty() { return; }
+                    if playlist_id >= s.playlist_entries.len() { return; }
+
+                    let entry = &s.playlist_entries[playlist_id];
+                    let video = entry.videos.get(content_id).cloned().unwrap_or_default();
+                    let duration = entry.durations.get(content_id).cloned().unwrap_or_default();
+                    let folder = s.video_folder_local.clone();
+                    let os_version = s.webos_version;
+                    let is_video = !video.ends_with(".jpg") && !video.ends_with(".png");
+
+                    log(&format!("[UDP] Sync received → playlist[{}] content[{}] player[{}]: {}", 
+                        playlist_id, content_id, player_id, video));
+
+                    s.running_media_player = player_id.to_string();
+
+                    play_cmd = Some(serde_json::json!({
+                        "req_id": 9997,
+                        "action": "PLAY_CONTENT",
+                        "options": {
+                            "player": player_id,
+                            "src": format!("{}{}", folder, video),
+                            "duration": duration,
+                            "is_video": is_video,
+                            "os_version": os_version
+                        }
+                    }).to_string());
+                });
+
+                if let Some(cmd) = play_cmd { scapCallbackBridge(&cmd); }
+            },
+
+            _ => {
+                log(&format!("[UDP] Unknown message type: {}", msg_type));
+            }
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub fn send_sync_to_slaves() {
+    // dipanggil oleh master setiap ganti content
+    let (is_master, playlist_id, content_id, player_id, udp_port) = CORE_STATE.with(|state| {
+        let s = state.borrow();
+        (s.is_master, s.active_playlist_id, s.active_content_id, 
+         s.running_media_player.clone(), s.udp_port)
+    });
+
+    if is_master != 1 { return; }
+
+    let payload = serde_json::json!({
+        "type": "SYNC",
+        "playlist_id": playlist_id,
+        "content_id": content_id,
+        "player_id": player_id
+    }).to_string();
+
+    scapCallbackBridge(&serde_json::json!({
+        "req_id": 9104,
+        "action": "UDP_BROADCAST",
+        "options": {
+            "data": payload,
+            "port": udp_port
         }
     }).to_string());
 }

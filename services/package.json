@@ -1,0 +1,16 @@
+{
+  "icon": "",
+  "type": "service",
+  "title": "",
+  "vendor": "",
+  "id": "com.lg.app.signage.dev.webosservice",
+  "name": "com.lg.app.signage.webosservice",
+  "version": "1.0.0",
+  "description": "UDP Sync Service",
+  "main": "udp_service.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "BSD"
+}

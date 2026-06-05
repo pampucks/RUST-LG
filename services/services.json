@@ -1,0 +1,28 @@
+{
+  "id": "com.lg.app.signage.dev.webosservice",
+  "description": "UDP Sync Service",
+  "services": [
+    {
+      "name": "com.lg.app.signage.webosservice",
+      "description": "DMM UDP SyncPlayer",
+      "public": true
+    }
+  ],
+  "methods": {
+    "startUDPService": {
+      "public": true
+    },
+    "broadcastUDP": {
+      "public": true
+    },
+    "sendUDP": {
+      "public": true
+    },
+    "subscribeUDP": {
+      "public": true
+    },
+    "stopUDPService": {
+      "public": true
+    }
+  }
+}
